@@ -80,6 +80,7 @@ npm run coverage      # Coverage report
 npm run typecheck     # TypeScript check
 npm run lint          # ESLint
 npm run test:openapi  # OpenAPI spec ↔ implementation conformance (drift)
+npm run test:e2e      # E2E tests (requires a running server at E2E_BASE_URL)
 ```
 
 ## Changelog
