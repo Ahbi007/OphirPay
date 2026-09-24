@@ -216,3 +216,82 @@ jobs:
       - uses: actions/checkout@v4
       - run: bash scripts/validate-deploy-config.sh
 
+  # ══════════════════════════════════════════════════════════════
+  # 8. HELM LINT — chart lint + render assertions (issue #684)
+  #    Proves the autoscaling / pdb / networkPolicy / serviceAccount
+  #    values actually produce objects instead of being inert.
+  # ══════════════════════════════════════════════════════════════
+  helm-lint:
+    name: "1️⃣9️⃣ Infra — Helm (Lint + Render)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm (pinned v3.16.3)
+        run: |
+          HELM_VER=3.16.3
+          curl -fsSL "https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz" | tar xz
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+      - name: Lint the chart with default values
+        run: helm lint helm/ophirpay --strict
+      - name: Lint the chart with every feature flag enabled
+        run: |
+          helm lint helm/ophirpay --strict \
+            --set autoscaling.enabled=true \
+            --set pdb.enabled=true \
+            --set networkPolicy.enabled=true \
+            --set serviceAccount.create=true
+      - name: Render and assert the flag-gated objects
+        run: |
+          set -euo pipefail
+
+          helm template ophirpay helm/ophirpay \
+            --set autoscaling.enabled=true \
+            --set autoscaling.minReplicas=3 \
+            --set autoscaling.maxReplicas=9 \
+            --set pdb.enabled=true \
+            --set networkPolicy.enabled=true \
+            --set serviceAccount.create=true \
+            > /tmp/enabled.yaml
+
+          helm template ophirpay helm/ophirpay \
+            --set autoscaling.enabled=false \
+            --set pdb.enabled=false \
+            --set networkPolicy.enabled=false \
+            --set serviceAccount.create=false \
+            > /tmp/disabled.yaml
+
+          fail=0
+          expect() {
+            if grep -q -- "$1" "$2"; then
+              echo "✅ $2 contains '$1'"
+            else
+              echo "::error::$2 is missing '$1'"
+              fail=1
+            fi
+          }
+          reject() {
+            if grep -q -- "$1" "$2"; then
+              echo "::error::$2 unexpectedly contains '$1'"
+              fail=1
+            else
+              echo "✅ $2 has no '$1'"
+            fi
+          }
+
+          expect "apiVersion: autoscaling/v2" /tmp/enabled.yaml
+          expect "kind: HorizontalPodAutoscaler" /tmp/enabled.yaml
+          expect "minReplicas: 3" /tmp/enabled.yaml
+          expect "maxReplicas: 9" /tmp/enabled.yaml
+          expect "kind: PodDisruptionBudget" /tmp/enabled.yaml
+          expect "kind: NetworkPolicy" /tmp/enabled.yaml
+          expect "kind: ServiceAccount" /tmp/enabled.yaml
+          expect "policyTypes:" /tmp/enabled.yaml
+
+          reject "kind: HorizontalPodAutoscaler" /tmp/disabled.yaml
+          reject "kind: PodDisruptionBudget" /tmp/disabled.yaml
+          reject "kind: NetworkPolicy" /tmp/disabled.yaml
+          reject "kind: ServiceAccount" /tmp/disabled.yaml
+
+          exit "$fail"
+
