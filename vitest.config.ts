@@ -35,60 +35,58 @@ export default defineConfig({
         // `src/lib/**`, so this keeps a future colocated test from re-entering
         // the production coverage denominator (#688).
         "**/*.test.{ts,tsx}",
-        "src/types/**",
-        "**/*.d.ts",
-        "src/lib/wallets/**",
-        "src/lib/index.ts",
-        "src/lib/contracts.ts",
-        "src/lib/contract-advanced.ts",
-        "src/lib/contract-events.ts",
-        "src/lib/stellar.ts",
-        "src/lib/rpc-failover.ts",
-        "src/lib/events/event-source.ts",
+        "src/types/**", // Types
+        "**/*.d.ts", // Types
+        "src/lib/wallets/**", // Browser-only
+        "src/lib/index.ts", // Re-export index
+        "src/lib/contracts.ts", // E2E-only
+        "src/lib/contract-advanced.ts", // E2E-only
+        "src/lib/contract-events.ts", // E2E-only
+        "src/lib/stellar.ts", // E2E-only
+        "src/lib/rpc-failover.ts", // E2E-only
+        "src/lib/events/event-source.ts", // E2E-only
         // Sharded database support is exercised by the Playwright E2E suite;
         // excluding its in-memory fixtures keeps unit coverage meaningful.
-        "src/lib/db/**",
-        "src/lib/api-auth.ts",
-        "src/lib/api-client.ts",
-        "src/lib/rate-limit.ts",
-        "src/lib/webhook-dispatcher.ts",
-        "src/lib/webhook-deliver.ts",
-        "src/lib/demo-mode.ts",
-        "src/lib/instrumentation.ts",
-        "src/lib/startup.ts",
-        "src/lib/sentry.ts",
-        "src/lib/deploy-verify.ts",
-        "src/hooks/useMultiWallet.tsx",
-        "src/hooks/useFreighter.tsx",
-        "src/hooks/useTheme.tsx",
-        "src/hooks/useRetry.ts",
-        "src/hooks/useApiQuery.ts",
-        "src/hooks/useNetworkChange.ts",
-        "src/hooks/useErrorTracker.ts",
-        "src/hooks/useKeyboardShortcuts.ts",
-        "src/hooks/useLocalStorage.ts",
-        "src/lib/ab-test.ts",
-        "src/lib/address-book.ts",
-        "src/lib/api-cache.ts",
-        "src/lib/audit.ts",
-        "src/lib/batch-validator.ts",
-        "src/lib/chart-data.ts",
-        "src/lib/client-auth.ts",
-        "src/lib/client-version.ts",
-        "src/lib/csv-import.ts",
-        "src/lib/deploy-verify.ts",
-        "src/lib/payment-link.ts",
-        "src/lib/prisma-logger.ts",
-        "src/lib/query-params.ts",
-        "src/lib/soft-delete.ts",
-        "src/components/ui/index.ts",
-        "src/hooks/index.ts",
-        "src/lib/test-factory.ts",
-        "src/lib/time.ts",
-        "src/lib/trustline.ts",
-        "src/lib/trustline-simulator.ts",
-        "src/lib/version-script.ts",
-        "src/lib/web-vitals.ts",
+        "src/lib/db/**", // E2E-only
+        "src/lib/api-auth.ts", // E2E-only
+        "src/lib/api-client.ts", // E2E-only
+        "src/lib/rate-limit.ts", // E2E-only
+        "src/lib/webhook-dispatcher.ts", // E2E-only
+        "src/lib/webhook-deliver.ts", // E2E-only
+        "src/lib/demo-mode.ts", // E2E-only
+        "src/instrumentation.ts", // Next.js entrypoint
+        "src/lib/startup.ts", // Next.js entrypoint
+        "src/lib/sentry.ts", // 3rd party integration
+        "src/lib/deploy-verify.ts", // E2E-only
+        "src/hooks/useMultiWallet.tsx", // Browser-only
+        "src/hooks/useFreighter.tsx", // Browser-only
+        "src/hooks/useTheme.tsx", // Browser-only
+        "src/hooks/useRetry.ts", // Browser-only
+        "src/hooks/useApiQuery.ts", // Browser-only
+        "src/hooks/useNetworkChange.ts", // Browser-only
+        "src/hooks/useErrorTracker.ts", // Browser-only
+        "src/hooks/useKeyboardShortcuts.ts", // Browser-only
+        "src/hooks/useLocalStorage.ts", // Browser-only
+        "src/lib/ab-test.ts", // E2E-only
+        "src/lib/address-book.ts", // Browser-only
+        "src/lib/api-cache.ts", // E2E-only
+        "src/lib/audit.ts", // E2E-only
+        "src/lib/batch-validator.ts", // E2E-only
+        "src/lib/chart-data.ts", // E2E-only
+        "src/lib/client-auth.ts", // E2E-only
+        "src/lib/client-version.ts", // E2E-only
+        "src/lib/csv-import.ts", // Browser-only
+        "src/lib/payment-link.ts", // E2E-only
+        "src/lib/prisma-logger.ts", // E2E-only
+        "src/lib/query-params.ts", // Browser-only
+        "src/lib/soft-delete.ts", // E2E-only
+        "src/components/ui/index.ts", // Re-export index
+        "src/hooks/index.ts", // Re-export index
+        "src/lib/test-factory.ts", // Test utilities
+        "src/lib/time.ts", // Browser-only
+        "src/lib/trustline.ts", // E2E-only
+        "src/lib/version-script.ts", // Build script
+        "src/lib/web-vitals.ts", // 3rd party integration
       ],
       thresholds: {
         statements: 80,
