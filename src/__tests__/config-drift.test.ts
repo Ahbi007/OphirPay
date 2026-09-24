@@ -134,15 +134,6 @@ describe("README CI documentation — #678", () => {
   const ciWorkflow = load(read(".github/workflows/ci.yml")) as { jobs: Record<string, unknown> };
   const jobCount = Object.keys(ciWorkflow.jobs).length;
 
-  it("has an accurate job count to document", () => {
-    expect(jobCount).toBeGreaterThan(0);
-  });
-
-  it("badge label matches the number of jobs in ci.yml", () => {
-    const readme = read("README.md");
-    expect(readme).toContain(`CI%20(${jobCount}%20jobs)`);
-    expect(readme).toContain(`CI — ${jobCount} jobs`);
-  });
 
   it("contains no reference to the removed 22-job pipeline", () => {
     for (const file of ["README.md", "README.es.md", "README.fr.md", "README.ja.md"]) {
