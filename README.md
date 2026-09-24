@@ -660,7 +660,7 @@ Path-scoped workflows add Prisma schema/migration replay
 the integration-branch guard (`enforce-integration-branch.yml`), dependency
 scanning and PR auto-labeling.
 
-**→ [View latest CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
+**→ [View the latest core CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
 
 ![CI/CD Pipeline](./public/screenshots/ci-pipeline.png)
 
