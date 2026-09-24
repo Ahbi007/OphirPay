@@ -10,7 +10,8 @@ RUN apt-get update -qq \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json* .nvmrc ./
+COPY scripts/check-node.mjs ./scripts/
 # Puppeteer (dev-only demo/screenshot scripts) downloads Chrome in its
 # postinstall; skip it — it isn't needed to build or run the server and the
 # download is a flaky network dependency in Docker.
