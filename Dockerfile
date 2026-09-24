@@ -29,17 +29,19 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate
 RUN npm run build
 
-# Stage 3: Runner (distroless for minimal attack surface)
-FROM gcr.io/distroless/nodejs20-debian12:nonroot AS runner
+# Stage 3: Runner
+FROM node:20-slim AS runner
+RUN apt-get update -qq && apt-get install -y --no-install-recommends openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+USER node
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
+COPY --chown=node:node --from=builder /app/public ./public
+COPY --chown=node:node --from=builder /app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /app/.next/standalone ./
+COPY --chown=node:node --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
 
