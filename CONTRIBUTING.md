@@ -27,6 +27,11 @@ Thank you for your interest in contributing! OphirPay is an open-source payment 
 - **Commits**: Follow [Conventional Commits](https://www.conventionalcommits.org)
 - **Before submitting**: Run `npm run ci` (typecheck → lint → test → build)
 
+### Dependency Updates
+
+Dependabot is configured to check for updates weekly across the `npm`, `cargo`, and `github-actions` ecosystems. Minor and patch updates are grouped to reduce PR volume. 
+When reviewing a Dependabot PR, ensure the CI checks pass. If there are breaking changes or failures, coordinate with the team before merging.
+
 ### Adding or changing an API endpoint
 
 Before adding or modifying an API endpoint, read the [API Endpoint Guide](docs/API_GUIDE.md). It documents the mandatory conventions: file structure, Zod validation, the error-handling pattern, auth middleware usage, the response envelope, rate-limit integration, a copy-pasteable worked example, and a pre-merge checklist.

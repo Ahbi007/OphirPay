@@ -842,9 +842,12 @@ Returns `(hook_id, url)` pairs for an event type.
 
 - **Access:** public read.
 
-### `get_subscriber_hooks(subscriber: Address) -> Vec<NotificationHook>`
+### `get_subscriber_hooks(subscriber: Address) -> HookList`
 
-Returns all hooks for a subscriber.
+Returns a subscriber's hooks, **most recently registered first**, capped at
+`MAX_READER_ENTRIES` (100). `HookList` = `{ items: Vec<NotificationHook>,
+ total: u32, truncated: bool }`; `truncated` is true when the subscriber has
+more hooks than were returned (issue #742, SPEC.md INV-11).
 
 - **Access:** public read.
 
@@ -879,9 +882,13 @@ Returns the number of batches.
 
 - **Access:** public read.
 
-### `get_payments_by_batch(batch_id: u64) -> Vec<Payment>`
+### `get_payments_by_batch(batch_id: u64) -> PaymentList`
 
-Returns the payments belonging to a batch.
+Returns the payments belonging to a batch, **most recently recorded first**,
+capped at `MAX_READER_ENTRIES` (100). `PaymentList` = `{ items: Vec<Payment>,
+ total: u32, truncated: bool }`; `truncated` is true when the batch holds more
+payments than were returned (issue #742, SPEC.md INV-11). An unknown batch
+returns an empty, untruncated list.
 
 - **Access:** public read.
 
