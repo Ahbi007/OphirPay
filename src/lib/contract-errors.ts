@@ -334,6 +334,12 @@ const CONTRACT_ERROR_MAP: Record<string, string> = {
   "298": "Grace period active: transitional restrictions in effect",
   "299": "Configuration invalid: stored configuration is malformed",
   "300": "System fatal error: unrecoverable internal failure",
+  "301": "Revocation not found",
+  "302": "Revocation not due",
+  "303": "Revocation already executed",
+  "304": "Cannot revoke self",
+  "305": "No pending ownership transfer",
+  "306": "Math overflow",
 };
 
 /**

@@ -794,6 +794,8 @@ pub enum PaymentError {
     RevocationNotDue = 302,
     RevocationAlreadyExecuted = 303,
     CannotRevokeSelf = 304,
+    NoPendingOwner = 305,
+    MathOverflow = 306,
 }
 
 // ── Native Events ──────────────────────────────────────────────
@@ -1102,12 +1104,25 @@ impl OphirPayContract {
     ) -> Result<(), PaymentError> {
         caller.require_auth();
         require_owner(&env, &caller)?;
-        if threshold == 0 || threshold > signers.len() {
+
+        let mut unique_signers = Vec::new(&env);
+        for signer in signers.into_iter() {
+            if !unique_signers.contains(signer.clone()) {
+                unique_signers.push_back(signer);
+            }
+        }
+
+        if unique_signers.len() > 50 {
+            return Err(PaymentError::MaxSignersExceeded);
+        }
+
+        if threshold == 0 || threshold > unique_signers.len() {
             return Err(PaymentError::InvalidAmount);
         }
+
         let config = MultisigConfig {
             threshold,
-            signers,
+            signers: unique_signers,
             enabled,
         };
 
@@ -2820,7 +2835,7 @@ impl OphirPayContract {
             .storage()
             .instance()
             .get(&PENDING_OWNER)
-            .ok_or(PaymentError::UpgradeNotProposed)?; // reuse: no pending transfer
+            .ok_or(PaymentError::NoPendingOwner)?; // no pending transfer
 
         if caller != pending {
             return Err(PaymentError::Unauthorized);
@@ -4040,7 +4055,7 @@ impl OphirPayContract {
             .storage()
             .persistent()
             .get(&(HOOK_KEY, hook_id))
-            .ok_or(PaymentError::AuditEntryNotFound)?; // reuse closest error
+            .ok_or(PaymentError::HookNotFound)?;
 
         if hook.subscriber != caller {
             return Err(PaymentError::Unauthorized);
@@ -4166,7 +4181,7 @@ impl OphirPayContract {
             if amount <= 0 {
                 continue;
             }
-            total_amount += amount;
+            total_amount = total_amount.checked_add(amount).ok_or(PaymentError::MathOverflow)?;
             pay_count += 1;
             actual_recipients += 1;
             payment_ids.push_back(pay_count);
