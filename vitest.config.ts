@@ -64,7 +64,7 @@ export default defineConfig({
         "src/lib/events/event-source.ts", // E2E-only
         // Sharded database support is exercised by the Playwright E2E suite;
         // excluding its in-memory fixtures keeps unit coverage meaningful.
-        "src/lib/db/**", // E2E-only
+        "src/lib/db/sharded-test-fixture.ts", // E2E-only
         "src/lib/api-auth.ts", // E2E-only
         "src/lib/api-client.ts", // E2E-only
         "src/lib/rate-limit.ts", // E2E-only
