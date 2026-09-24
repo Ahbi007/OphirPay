@@ -23,7 +23,7 @@
 
   <p>
     <a href="https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml">
-      <img src="https://img.shields.io/github/actions/workflow/status/OphirPay/OphirPay/ci.yml?label=CI%20(22%20jobs)&logo=githubactions&logoColor=white" alt="CI — 22 jobs" />
+      <img src="https://img.shields.io/github/actions/workflow/status/OphirPay/OphirPay/ci.yml?label=CI%20(4%20jobs)&logo=githubactions&logoColor=white" alt="CI — 4 jobs" />
     </a>
     <a href="#-testing--quality">
       <img src="https://img.shields.io/badge/tests-970%20passed%20(806%20app%20%2B%2067%20contracts%20%2B%2097%20e2e)-brightgreen.svg" alt="970 Tests Passing" />
@@ -624,62 +624,36 @@ Each type renders with distinct colors (yellow/red/orange) and actionable messag
 
 ## 🔄 CI/CD Pipeline
 
-Every push to `main` triggers **22 jobs** across six tracks:
-
-```
-┌─ Frontend ─────────────────────────────────────────────────┐
-│ Lint → TypeCheck → Unit Tests → Coverage → Build → Bundle   │
-│ Size → A11y (axe-core) → E2E (Playwright) → Smoke (curl)    │
-└─────────────────────────────────────────────────────────────┘
-┌─ Backend ──────────────────────────────────────────────────┐
-│ Contracts (WASM + Tests) → Clippy → rustfmt → Gas Report →  │
-│ Prisma (Validate + DB) → npm Audit                          │
-└─────────────────────────────────────────────────────────────┘
-┌─ Infra · Docs · Security · Meta ───────────────────────────┐
-│ Docker Build → K8s (kubeconform) → Helm Lint → OpenAPI      │
-│ Validate → Spell Check (typos) → Secrets (Gitleaks) →       │
-│ PR Labeler                                                  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Frontend (9 jobs)
+The required checks live in a single workflow, [`ci.yml`](.github/workflows/ci.yml),
+which runs on every push to `main` and on pull requests targeting `main`.
+It has **four jobs**:
 
 | Job | Command | Purpose |
 |---|---|---|
-| Lint | `npx eslint . --max-warnings 20` | ESLint with zero-error tolerance |
 | TypeCheck | `tsc --noEmit` | Full project strict type-checking |
-| Unit Tests | `vitest run --reporter=verbose` | 806 app tests across 33 suites |
-| Coverage | `vitest run --coverage` | v8 coverage report + thresholds |
-| Build | `next build` | Production Next.js build verification |
-| Bundle Size | bundle-size check | Regression guard on JS payloads |
-| A11y | axe-core audit | WCAG accessibility scan |
-| E2E | Playwright | 97 end-to-end scenarios |
-| Smoke | curl (19 pages) | HTTP 200 check against live Vercel |
+| Unit Tests | `vitest run --reporter=verbose` | App unit & integration suites |
+| Contracts (WASM + Tests) | `cargo build --target wasm32v1-none` + `cargo test` | Builds both Soroban contracts to WASM and runs their tests |
+| Secrets (Gitleaks) | `gitleaks detect` | Secret scanning plus positive/negative scanner self-tests |
 
-### Backend (6 jobs)
+Everything else runs as a standalone workflow, scoped by its trigger so it only
+runs when relevant:
 
-| Job | Command | Purpose |
+| Workflow | Trigger | Purpose |
 |---|---|---|
-| Contracts | `cargo build --target wasm32v1-none` | Both Soroban contracts to WASM |
-| Clippy | `cargo clippy -- -D warnings` | Rust lint, zero warnings |
-| Format | `cargo fmt --check` | rustfmt conformance |
-| Gas Report | `cargo build` + estimate | Per-function gas report artifact |
-| Prisma | `prisma validate` + `prisma db push` | Schema integrity + runtime DB test |
-| Audit | `npm audit` | Dependency vulnerability scan |
+| [`contract-regression.yml`](.github/workflows/contract-regression.yml) | PR touching `contracts/**` | WASM contract size guardrails |
+| [`prisma-ci.yml`](.github/workflows/prisma-ci.yml) | PR/push touching `prisma/**` | `prisma validate`, migration replay, schema-drift check against Postgres |
+| [`dependency-scan.yml`](.github/workflows/dependency-scan.yml) | Nightly + `workflow_dispatch` | `npm audit` with documented suppressions; fails on high/critical |
+| [`pr-labeler.yml`](.github/workflows/pr-labeler.yml) | PR opened/synchronized/reopened | Auto-labels PRs by changed paths |
+| [`enforce-integration-branch.yml`](.github/workflows/enforce-integration-branch.yml) | PR opened/edited/reopened/synchronized | Keeps batch-mode PRs off `main` while `integration/staging` exists |
+| [`scorecard.yml`](.github/workflows/scorecard.yml) | Weekly + branch-protection change | OpenSSF Scorecard supply-chain analysis |
+| [`stale.yml`](.github/workflows/stale.yml) | Weekly | Marks and closes stale issues and PRs |
+| [`db-backup.yml`](.github/workflows/db-backup.yml) | Daily + `workflow_dispatch` | Postgres backup to S3 |
+| [`scheduled-payments-cron.yml`](.github/workflows/scheduled-payments-cron.yml) | Every 5 minutes + `workflow_dispatch` | Executes due scheduled payments |
 
-### Infra, Docs, Security & Meta (7 jobs)
+> ℹ️ The badge at the top of this README reflects the **four jobs in `ci.yml`**;
+> it does not count the independently-triggered workflows in the table above.
 
-| Job | Purpose |
-|---|---|
-| Docker Build | Container image build + push |
-| K8s | `kubeconform -strict` manifest validation |
-| Helm | `helm lint --strict` chart validation |
-| OpenAPI | API spec validation |
-| Spell Check | `typos` docs check |
-| Gitleaks | Secrets scanning on every push |
-| PR Labeler | Auto-labels PRs by changed paths |
-
-**→ [View latest CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
+**→ [View the latest core CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
 
 ![CI/CD Pipeline](./public/screenshots/ci-pipeline.png)
 
@@ -729,7 +703,7 @@ Every push to `main` triggers **22 jobs** across six tracks:
 | **Wallet** | [Freighter](https://freighter.app) · [xBull](https://xbull.app) · [Rabet](https://rabet.io) · [Albedo](https://albedo.link) · [Lobstr](https://lobstr.co) · [Ledger](https://ledger.com) | 6-wallet connector abstraction |
 | **Database** | [Prisma](https://prisma.io) + PostgreSQL (Neon) / SQLite | Type-safe ORM, provider switching |
 | **Testing** | [Vitest](https://vitest.dev) + React Testing Library + [Playwright](https://playwright.dev) | Unit, integration & E2E coverage |
-| **CI/CD** | [GitHub Actions](https://github.com/features/actions) | 22-job pipeline on push |
+| **CI/CD** | [GitHub Actions](https://github.com/features/actions) | 4-job CI on push/PR + scheduled workflows |
 | **Hosting** | [Vercel](https://vercel.com) | Auto-deploy from `main`, edge network |
 
 ---
@@ -789,7 +763,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org):
 | ✅ Cross-contract communication | **Done** |
 | ✅ SSE event streaming from chain | **Done** |
 | ✅ Mobile responsive UI | **Done** |
-| ✅ CI/CD pipeline (22 jobs) + 806 app tests + 67 contract tests + 97 e2e | **Done** |
+| ✅ CI/CD pipeline (4 jobs) + 806 app tests + 67 contract tests + 97 e2e | **Done** |
 | ✅ Multi-wallet support (Freighter, Albedo, xBull, Rabet, Lobstr, Ledger) | **Done** |
 | ✅ Stellar assets (USDC, custom tokens, trustline checks) | **Done** |
 | ✅ Payment request links (shareable invoices, QR codes) | **Done** |
