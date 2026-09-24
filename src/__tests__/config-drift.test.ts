@@ -131,9 +131,6 @@ describe("CSP documentation (next.config.ts) — #679", () => {
 });
 
 describe("README CI documentation — #678", () => {
-  const ciWorkflow = load(read(".github/workflows/ci.yml")) as { jobs: Record<string, unknown> };
-  const jobCount = Object.keys(ciWorkflow.jobs).length;
-
 
   it("contains no reference to the removed 22-job pipeline", () => {
     for (const file of ["README.md", "README.es.md", "README.fr.md", "README.ja.md"]) {
