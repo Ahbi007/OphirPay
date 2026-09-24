@@ -2773,7 +2773,7 @@ impl OphirPayContract {
     ) -> Result<(), PaymentError> {
         caller.require_auth();
         require_owner(&env, &caller)?;
-        let unlock_at = env.ledger().timestamp() + 86400; // 24 hours
+        let unlock_at = env.ledger().timestamp().saturating_add(TMLOCK_DELAY); // 24 hours
         env.storage().instance().set(&UPGRADE_HASH, &new_wasm_hash);
         env.storage().instance().set(&UPGRADE_TIMELOCK, &unlock_at);
         env.storage().instance().extend_ttl(BUMP_MIN_TTL, BUMP_MAX_TTL);
