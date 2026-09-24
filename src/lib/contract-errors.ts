@@ -334,6 +334,8 @@ const CONTRACT_ERROR_MAP: Record<string, string> = {
   "298": "Grace period active: transitional restrictions in effect",
   "299": "Configuration invalid: stored configuration is malformed",
   "300": "System fatal error: unrecoverable internal failure",
+  // ── Stream Accounting Guards (305) ──────────────────────
+  "305": "Stream accounting invariant violated: refused to pay an inconsistent amount",
 };
 
 /**

@@ -691,8 +691,13 @@ fn composite_locked_balance_and_deposit() {
 // ═══════════════════════════════════════════════════════════════
 // BONUS: No Overflow in compute_vested
 //
-// The linear vesting calculation uses checked_mul to prevent
-// overflow. On overflow, returns 0 (safe default).
+// The contract's linear vesting calculation is evaluated at 256-bit
+// precision (checked_mul fast path plus a quotient/remainder fallback),
+// so it never returns 0 for a partially vested stream and never exceeds
+// the stream total.
+//
+// The model below mirrors only the boundary branches — the widened
+// multiply path is not machine-checked here (see docs/AUDIT.md).
 // ═══════════════════════════════════════════════════════════════
 
 /// Prove that at boundary points, vesting behaves correctly.

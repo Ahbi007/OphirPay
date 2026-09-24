@@ -281,7 +281,13 @@ and re-run the IP/hostname check against the final resolved address after follow
 
 1. **`compute_vested` returns `0` on multiplication overflow** (`lib.rs` L884): a silent
    under-vest instead of capping at `total_amount`. `claim_stream` also uses non-saturating
-   `vested - claimed_amount`.
+   `vested - claimed_amount`. — ✅ **FIXED (2026-09-24).** The multiply is now evaluated at
+   256-bit precision (checked `i128` fast path plus a quotient/remainder fallback), so an
+   overflowing product yields the exact vested value instead of `0`. Capping at
+   `total_amount` was rejected: with `total_amount = i128::MAX` and a 4-second schedule it
+   would vest the entire stream 2 seconds in, letting the recipient drain the contract.
+   `claim_stream` uses `checked_sub` and returns `StreamInvariantViolated` (305) if the
+   INV-5 ceiling is ever breached (#691).
 2. **`approve_refund` / `reject_refund` / `process_refund` lack `require_not_paused`** — refunds
    can settle during an emergency pause.
 3. **`request_refund` does not tie `asset`/`amount` to the payment** (see HIGH-1).

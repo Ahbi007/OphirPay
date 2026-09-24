@@ -8,7 +8,18 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    include: ["**/*.test.{ts,tsx}"],
+    // Tests are collected only from the sanctioned test roots. A narrow glob
+    // means a stray `*.test.ts` colocated inside shipped source (src/lib,
+    // src/app, …) can no longer be collected silently. `src/__tests__` is the
+    // documented convention (see docs/API_GUIDE.md → "Testing your endpoint");
+    // `scripts` holds unit tests for build tooling and `tests` is reserved for
+    // non-Vitest (Playwright) suites.
+    // Guarded against regression by src/__tests__/repo-hygiene.test.ts.
+    include: [
+      "src/__tests__/**/*.test.{ts,tsx}",
+      "scripts/**/*.test.{ts,tsx}",
+      "tests/**/*.test.{ts,tsx}",
+    ],
     env: {
       NEXT_PUBLIC_CONTRACT_ID: "CCQGGUJRRVXMHNEX2RYPODGJE2YRMYY4Y7A3KTJH3QP2LWZLTCOPRPET",
       NEXT_PUBLIC_EMITTER_CONTRACT_ID: "CDAVU2XJ7C2Y52GRJZKRG3HDI7AJ2K2FHAFH5FPDTSUQAV7XNBQNNVAN",
@@ -19,6 +30,11 @@ export default defineConfig({
       include: ["src/lib/**", "src/components/ui/**", "src/hooks/**", "src/app/api/**"],
       exclude: [
         "src/__tests__/**",
+        // Defensive: a test file must never be measured as production source,
+        // whichever root it is collected from. `coverage.include` covers
+        // `src/lib/**`, so this keeps a future colocated test from re-entering
+        // the production coverage denominator (#688).
+        "**/*.test.{ts,tsx}",
         "src/types/**",
         "**/*.d.ts",
         "src/lib/wallets/**",
