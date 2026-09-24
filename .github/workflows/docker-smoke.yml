@@ -45,6 +45,7 @@ jobs:
             --network host \
             -e DATABASE_URL=postgresql://ophirpay:ophirpay@localhost:5432/ophirpay \
             -e REDIS_URL=redis://localhost:6379 \
+            -e HOSTNAME=0.0.0.0 \
             -e NEXT_PUBLIC_CONTRACT_ID=CCQGGUJRRVXMHNEX2RYPODGJE2YRMYY4Y7A3KTJH3QP2LWZLTCOPRPET \
             -e NEXT_PUBLIC_EMITTER_CONTRACT_ID=CCQGGUJRRVXMHNEX2RYPODGJE2YRMYY4Y7A3KTJH3QP2LWZLTCOPRPET \
             ophirpay:smoke
