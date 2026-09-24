@@ -566,6 +566,10 @@ npx playwright test
 
 # Full CI pipeline
 npm run ci   # typecheck → lint → test → build
+
+# Visual Regression
+npm run test:visual        # Compare against baselines
+npm run test:visual:update # Update baselines
 ```
 
 ### Unit Tests (Vitest) — 806 cases
