@@ -207,6 +207,46 @@ changes, only the latest 100 are returned.
 
 ---
 
+### INV-11: Enumeration is Bounded and Reports Truncation
+
+**Statement:** Every read-only function that enumerates a stored collection
+SHALL return at most `MAX_READER_ENTRIES` (100) entries and SHALL expose
+whether the result was truncated. A reader MUST NOT walk an arbitrarily long
+stored vector inside a single invocation.
+
+The bounded readers are:
+
+| Reader | Result type | Cap | Order | Truncation field |
+|---|---|---|---|---|
+| `get_audit_log_range(start_id, end_id)` | `Vec<AuditEntry>` | 100 | most recent first | *(inherent in the requested range)* |
+| `get_payments_range(start_id, end_id)` | `Vec<Payment>` | 100 | most recent first | *(inherent in the requested range)* |
+| `get_reason_code_analytics()` | `Vec<(u32, u64)>` | 100 most recent refunds | n/a | *(aggregate)* |
+| `get_fee_config_history()` / `get_multisig_config_history()` | `Vec<…Version>` | 100 | most recent first | *(inherent in the requested range)* |
+| `get_payments_by_batch(batch_id)` | `PaymentList` | 100 | most recent first | `truncated` |
+| `get_subscriber_hooks(subscriber)` | `HookList` | 100 | most recent first | `truncated` |
+
+`PaymentList` and `HookList` carry `items`, `total` (how many entries the
+underlying collection actually holds) and `truncated` (true only when the
+reader stopped before exhausting the collection). Callers MUST treat
+`truncated == true` as partial data: page, or ask for a narrower query.
+
+The upstream collections are **not** self-bounding. `register_hook` places no
+limit on how many hooks a subscriber accumulates, and a batch record written
+before the `BatchTooLarge` guard existed can hold more payment ids than
+`create_batch` accepts today. The cap therefore lives in the reader, not in the
+writer's current validation.
+
+**Rationale:** docs/AUDIT.md MEDIUM-2 — unbounded enumeration makes an
+endpoint unreliable (instruction-budget exhaustion) rather than returning a
+clean error.
+
+**Tests:** `test_get_subscriber_hooks_caps_and_flags_truncation`,
+`test_get_subscriber_hooks_at_cap_is_not_truncated`,
+`test_get_payments_by_batch_caps_and_flags_truncation`,
+`test_get_payments_by_batch_within_cap_is_not_truncated`
+
+---
+
 ## State Transition Diagram
 
 ```

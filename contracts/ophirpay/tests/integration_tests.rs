@@ -290,12 +290,16 @@ fn test_batch_payment_happy_path() {
     assert_eq!(batch.payment_ids.len(), 4);
 
     // Verify payments by batch
+    // Bounded reader (#742): a `PaymentList` of at most 100 entries, newest
+    // first, with an explicit truncation flag.
     let batch_payments = fix.client.get_payments_by_batch(&1);
-    assert_eq!(batch_payments.len(), 4);
-    assert_eq!(batch_payments.get(0).unwrap().payee, p1);
-    assert_eq!(batch_payments.get(0).unwrap().amount, 100_000);
-    assert_eq!(batch_payments.get(3).unwrap().payee, p4);
-    assert_eq!(batch_payments.get(3).unwrap().amount, 150_000);
+    assert_eq!(batch_payments.total, 4);
+    assert!(!batch_payments.truncated);
+    assert_eq!(batch_payments.items.len(), 4);
+    assert_eq!(batch_payments.items.get(0).unwrap().payee, p4);
+    assert_eq!(batch_payments.items.get(0).unwrap().amount, 150_000);
+    assert_eq!(batch_payments.items.get(3).unwrap().payee, p1);
+    assert_eq!(batch_payments.items.get(3).unwrap().amount, 100_000);
 }
 
 #[test]
