@@ -771,6 +771,9 @@ Returns the number of recurring schedules.
 
 ## Refunds
 
+See the [Refunds guide](REFUNDS.md) for the complete reason-code catalog,
+lifecycle authorization rules, and the bounded analytics behavior.
+
 ### `request_refund(requester: Address, payment_id: u64, amount: i128, asset: Address, reason: String, reason_code: RefundReasonCode) -> Result<u64, PaymentError>`
 
 Requests a refund; returns the refund ID.
