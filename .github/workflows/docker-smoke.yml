@@ -49,8 +49,11 @@ jobs:
             -e NEXT_PUBLIC_EMITTER_CONTRACT_ID=CCQGGUJRRVXMHNEX2RYPODGJE2YRMYY4Y7A3KTJH3QP2LWZLTCOPRPET \
             ophirpay:smoke
 
-          echo "Waiting for app to start..."
-          npx -y wait-on -t 60000 http://localhost:3000/api/health
+          npx -y wait-on -t 60000 http://localhost:3000/api/health || {
+            echo "❌ wait-on timed out! Container logs:"
+            docker logs app-smoke
+            exit 1
+          }
           
           status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health)
           if [ "$status" = "200" ]; then
