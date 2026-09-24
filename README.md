@@ -685,7 +685,9 @@ contract and secret scans:
 Path-scoped workflows add Prisma schema/migration replay
 (`prisma-ci.yml`), contract WASM size guardrails (`contract-regression.yml`),
 the integration-branch guard (`enforce-integration-branch.yml`), dependency
-scanning and PR auto-labeling.
+scanning (`dependency-scan.yml`), PR auto-labeling (`pr-labeler.yml`),
+security scorecard (`scorecard.yml`), issue staleness (`stale.yml`), database
+backups (`db-backup.yml`), and scheduled payments (`scheduled-payments-cron.yml`).
 
 **→ [View the latest core CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
 

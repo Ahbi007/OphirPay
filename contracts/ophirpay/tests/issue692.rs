@@ -11,7 +11,7 @@ fn test_propose_upgrade_timestamp_saturation() {
     let client = OphirPayContractClient::new(&env, &contract_id);
     
     let admin = Address::generate(&env);
-    client.initialize(&admin, &admin);
+    client.init(&admin);
     
     let new_wasm_hash = BytesN::from_array(&env, &[0; 32]);
     
@@ -34,7 +34,7 @@ fn test_emitter_propose_upgrade_timestamp_saturation() {
     let client = PaymentEventEmitterClient::new(&env, &contract_id);
     
     let admin = Address::generate(&env);
-    client.initialize(&admin);
+    client.init(&admin);
     
     let new_wasm_hash = BytesN::from_array(&env, &[0; 32]);
     

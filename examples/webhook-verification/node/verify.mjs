@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 // SPDX-License-Identifier: MIT
 /**
  * OphirPay webhook signature verification — reference implementation (Node.js)
