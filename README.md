@@ -23,7 +23,7 @@
 
   <p>
     <a href="https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml">
-      <img src="https://img.shields.io/github/actions/workflow/status/OphirPay/OphirPay/ci.yml?label=CI%20(22%20jobs)&logo=githubactions&logoColor=white" alt="CI — 22 jobs" />
+      <img src="https://img.shields.io/github/actions/workflow/status/OphirPay/OphirPay/ci.yml?label=CI&logo=githubactions&logoColor=white" alt="CI" />
     </a>
     <a href="#-testing--quality">
       <img src="https://img.shields.io/badge/tests-970%20passed%20(806%20app%20%2B%2067%20contracts%20%2B%2097%20e2e)-brightgreen.svg" alt="970 Tests Passing" />
@@ -566,6 +566,10 @@ npx playwright test
 
 # Full CI pipeline
 npm run ci   # typecheck → lint → test → build
+
+# Visual Regression
+npm run test:visual        # Compare against baselines
+npm run test:visual:update # Update baselines
 ```
 
 ### Unit Tests (Vitest) — 806 cases
@@ -624,60 +628,37 @@ Each type renders with distinct colors (yellow/red/orange) and actionable messag
 
 ## 🔄 CI/CD Pipeline
 
-Every push to `main` triggers **22 jobs** across six tracks:
+`.github/workflows/ci.yml` is the merge gate and runs on every PR. It is a
+superset of `npm run ci` — the same frontend checks plus the language-specific
+contract and secret scans:
 
 ```
-┌─ Frontend ─────────────────────────────────────────────────┐
-│ Lint → TypeCheck → Unit Tests → Coverage → Build → Bundle   │
-│ Size → A11y (axe-core) → E2E (Playwright) → Smoke (curl)    │
+┌─ Frontend ──────────────────────────────────────────────────┐
+│ Lint (--max-warnings 0) → TypeCheck → Unit Tests → Build     │
 └─────────────────────────────────────────────────────────────┘
-┌─ Backend ──────────────────────────────────────────────────┐
-│ Contracts (WASM + Tests) → Clippy → rustfmt → Gas Report →  │
-│ Prisma (Validate + DB) → npm Audit                          │
-└─────────────────────────────────────────────────────────────┘
-┌─ Infra · Docs · Security · Meta ───────────────────────────┐
-│ Docker Build → K8s (kubeconform) → Helm Lint → OpenAPI      │
-│ Validate → Spell Check (typos) → Secrets (Gitleaks) →       │
-│ PR Labeler                                                  │
+┌─ Backend · Security · Deploy ───────────────────────────────┐
+│ Contracts (WASM + Tests) → Secrets (Gitleaks) →              │
+│ Deploy Config Guards → Helm Lint + Render                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Frontend (9 jobs)
+### Jobs (`ci.yml`)
 
 | Job | Command | Purpose |
 |---|---|---|
-| Lint | `npx eslint . --max-warnings 20` | ESLint with zero-error tolerance |
+| Lint | `eslint . --max-warnings 0` | ESLint with zero-error, zero-warning tolerance |
 | TypeCheck | `tsc --noEmit` | Full project strict type-checking |
 | Unit Tests | `vitest run --reporter=verbose` | 806 app tests across 33 suites |
-| Coverage | `vitest run --coverage` | v8 coverage report + thresholds |
-| Build | `next build` | Production Next.js build verification |
-| Bundle Size | bundle-size check | Regression guard on JS payloads |
-| A11y | axe-core audit | WCAG accessibility scan |
-| E2E | Playwright | 97 end-to-end scenarios |
-| Smoke | curl (19 pages) | HTTP 200 check against live Vercel |
+| Build | `next build` (after `prisma generate`) | Production Next.js build verification |
+| Contracts | `cargo build --target wasm32v1-none` + `cargo test` | Both Soroban contracts to WASM |
+| Deploy Config | `scripts/validate-deploy-config.sh` | Public-config guards on the deploy script |
+| Secrets | `gitleaks detect` + scanner self-test | Secret scanning on every PR |
+| Helm | `helm lint` + `helm template` | Chart validation and render checks |
 
-### Backend (6 jobs)
-
-| Job | Command | Purpose |
-|---|---|---|
-| Contracts | `cargo build --target wasm32v1-none` | Both Soroban contracts to WASM |
-| Clippy | `cargo clippy -- -D warnings` | Rust lint, zero warnings |
-| Format | `cargo fmt --check` | rustfmt conformance |
-| Gas Report | `cargo build` + estimate | Per-function gas report artifact |
-| Prisma | `prisma validate` + `prisma db push` | Schema integrity + runtime DB test |
-| Audit | `npm audit` | Dependency vulnerability scan |
-
-### Infra, Docs, Security & Meta (7 jobs)
-
-| Job | Purpose |
-|---|---|
-| Docker Build | Container image build + push |
-| K8s | `kubeconform -strict` manifest validation |
-| Helm | `helm lint --strict` chart validation |
-| OpenAPI | API spec validation |
-| Spell Check | `typos` docs check |
-| Gitleaks | Secrets scanning on every push |
-| PR Labeler | Auto-labels PRs by changed paths |
+Path-scoped workflows add Prisma schema/migration replay
+(`prisma-ci.yml`), contract WASM size guardrails (`contract-regression.yml`),
+the integration-branch guard (`enforce-integration-branch.yml`), dependency
+scanning and PR auto-labeling.
 
 **→ [View latest CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
 
@@ -729,7 +710,7 @@ Every push to `main` triggers **22 jobs** across six tracks:
 | **Wallet** | [Freighter](https://freighter.app) · [xBull](https://xbull.app) · [Rabet](https://rabet.io) · [Albedo](https://albedo.link) · [Lobstr](https://lobstr.co) · [Ledger](https://ledger.com) | 6-wallet connector abstraction |
 | **Database** | [Prisma](https://prisma.io) + PostgreSQL (Neon) / SQLite | Type-safe ORM, provider switching |
 | **Testing** | [Vitest](https://vitest.dev) + React Testing Library + [Playwright](https://playwright.dev) | Unit, integration & E2E coverage |
-| **CI/CD** | [GitHub Actions](https://github.com/features/actions) | 22-job pipeline on push |
+| **CI/CD** | [GitHub Actions](https://github.com/features/actions) | Gating pipeline on every PR |
 | **Hosting** | [Vercel](https://vercel.com) | Auto-deploy from `main`, edge network |
 
 ---
@@ -789,7 +770,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org):
 | ✅ Cross-contract communication | **Done** |
 | ✅ SSE event streaming from chain | **Done** |
 | ✅ Mobile responsive UI | **Done** |
-| ✅ CI/CD pipeline (22 jobs) + 806 app tests + 67 contract tests + 97 e2e | **Done** |
+| ✅ CI/CD pipeline + 806 app tests + 67 contract tests + 97 e2e | **Done** |
 | ✅ Multi-wallet support (Freighter, Albedo, xBull, Rabet, Lobstr, Ledger) | **Done** |
 | ✅ Stellar assets (USDC, custom tokens, trustline checks) | **Done** |
 | ✅ Payment request links (shareable invoices, QR codes) | **Done** |
