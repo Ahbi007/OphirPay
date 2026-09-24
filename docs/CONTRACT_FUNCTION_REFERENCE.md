@@ -707,7 +707,7 @@ Creates a payment stream; returns the stream ID.
 Claims the accrued stream amount; returns the claimed amount.
 
 - **Access:** actor auth (`recipient.require_auth()`).
-- **Errors:** `StreamNotFound` (11), `StreamNotStarted` (9), `StreamFullyClaimed` (12), `Unauthorized` (4).
+- **Errors:** `StreamNotFound` (11), `StreamNotStarted` (9), `StreamFullyClaimed` (12), `StreamInvariantViolated` (307), `Unauthorized` (4).
 
 ### `cancel_stream(creator: Address, stream_id: u64) -> Result<i128, PaymentError>`
 
