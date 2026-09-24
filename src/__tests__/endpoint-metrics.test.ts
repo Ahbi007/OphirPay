@@ -9,6 +9,7 @@ import {
 } from "@/lib/metrics-counters";
 import { withMetrics } from "@/lib/metrics-middleware";
 import { GET } from "@/app/api/metrics/route";
+import { resetMetricsForTest } from "@/lib/metrics-counters";
 
 describe("per-endpoint metrics", () => {
   beforeEach(() => {
@@ -103,5 +104,74 @@ describe("per-endpoint metrics", () => {
       'ophirpay_endpoint_errors_total{method="POST",endpoint="/api/payments",status_class="5xx"} 1'
     );
     expect(text).toContain("# TYPE ophirpay_endpoint_errors_total counter");
+  });
+
+  it("matches the Prometheus exposition format golden file", async () => {
+    resetMetricsForTest();
+    recordEndpointLatency("GET", "/api/payments", 200, 0.05);
+    recordEndpointLatency("GET", "/api/payments", 200, 0.3);
+    recordEndpointLatency("POST", '/api/escape/"\\', 500, 1.2);
+
+    const res = await GET();
+    const text = await res.text();
+    
+    // Ignore dynamic parts like memory info
+    const staticText = text
+      .replace(/ophirpay_process_resident_set_bytes \d+/g, 'ophirpay_process_resident_set_bytes 0')
+      .replace(/ophirpay_process_heap_used_bytes \d+/g, 'ophirpay_process_heap_used_bytes 0')
+      .replace(/ophirpay_process_heap_total_bytes \d+/g, 'ophirpay_process_heap_total_bytes 0');
+
+    await expect(staticText).toMatchFileSnapshot("__snapshots__/prometheus-exposition.golden.txt");
+  });
+
+  it("produces valid structural formatting (TYPE lines and cumulative buckets)", async () => {
+    resetMetricsForTest();
+    recordEndpointLatency("GET", "/api/payments", 200, 0.05);
+    recordEndpointLatency("GET", "/api/payments", 200, 0.3);
+    recordEndpointLatency("POST", '/api/escape/"\\', 500, 1.2);
+
+    const res = await GET();
+    const text = await res.text();
+    const lines = text.split("\n");
+
+    const metricFamilies = new Set<string>();
+    const typeLines = new Set<string>();
+    
+    let previousBucketVal = 0;
+    let currentBucketName = "";
+
+    for (const line of lines) {
+      if (!line || line.startsWith("# HELP") || line.startsWith("# TYPE")) {
+        if (line.startsWith("# TYPE")) {
+          const parts = line.split(" ");
+          typeLines.add(parts[2]);
+        }
+        continue;
+      }
+      
+      const name = line.split("{")[0].split(" ")[0];
+      const familyName = name.replace(/_bucket$|_sum$|_count$/, "");
+      metricFamilies.add(familyName);
+
+      if (name.endsWith("_bucket")) {
+        const val = Number(line.split(" ").pop());
+        const bucketBaseName = line.split(",le=")[0];
+        if (bucketBaseName !== currentBucketName) {
+           previousBucketVal = 0;
+           currentBucketName = bucketBaseName;
+        }
+        expect(val).toBeGreaterThanOrEqual(previousBucketVal);
+        previousBucketVal = val;
+        
+        if (line.includes('le="+Inf"')) {
+          currentBucketName = ""; // reset for next histogram
+        }
+      }
+    }
+
+    // Every family should have a matching TYPE line
+    for (const family of metricFamilies) {
+      expect(typeLines.has(family)).toBe(true);
+    }
   });
 });
