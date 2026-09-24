@@ -5,7 +5,7 @@
 // These tests focus on the router's logic independently of the E2E in-memory
 // database fixture (sharded-test-fixture.ts).
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { ShardedDatabaseRouter, ShardConfig } from "@/lib/db/shard-router";
 
 describe("ShardedDatabaseRouter", () => {
