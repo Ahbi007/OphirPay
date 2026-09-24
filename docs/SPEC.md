@@ -103,12 +103,27 @@ claimable = min(total_amount, (now - start) / (end - start) * total_amount) - cl
 
 After the stream end time, the full remaining amount is claimable.
 
-**Code evidence:** `compute_vested()` uses checked multiplication with overflow
-protection. `claim_stream()` computes `claimable = vested - stream.claimed_amount`
-and returns `StreamFullyClaimed` if `claimable == 0`.
+**Code evidence:** `compute_vested()` evaluates `total_amount * elapsed` at
+256-bit precision: `i128::checked_mul` on the fast path, and the quotient/
+remainder decomposition `(a / d) * b + ((a % d) * b) / d` when the 128-bit
+product would overflow. The result is therefore always the exact linear vesting
+value and is bounded by `total_amount`.
 
-**Test:** `test_stream_vesting_math` — verifies partial claims at 25%, 50%, 75%
-and that full amount is claimable after end time.
+Overflow MUST NOT collapse the vested amount to `0` (which silently under-vests
+a large stream) and MUST NOT cap it at `total_amount` (which would over-vest a
+stream that is only partially elapsed).
+
+`claim_stream()` computes `claimable = vested.checked_sub(stream.claimed_amount)`,
+returning `StreamInvariantViolated` (307) if the subtraction would be negative
+and `StreamFullyClaimed` if `claimable == 0`.
+
+**Test:** `test_create_and_claim_stream` — verifies partial claims at 50% and
+that the full amount is claimable after end time. Overflow behaviour is covered
+by `test_compute_vested_overflow_is_exact_and_not_zero`,
+`test_compute_vested_overflow_is_bounded_and_monotonic`,
+`test_compute_vested_overflow_fully_vests_at_end`,
+`test_claim_stream_with_overflowing_vesting_pays_correct_balance` and the
+end-to-end `test_stream_vesting_overflow_pays_correct_balance_end_to_end`.
 
 ---
 
@@ -236,5 +251,8 @@ cd contracts/emitter && cargo test                              # emitter unit t
 
 - [x] Property testing with `proptest` for token-moving paths & reentrancy sequences (`LOCKED_BALANCE` conservation)
 - [ ] Bounded model checking with `kani` for the 5 highest-risk invariants
-- [ ] Formal verification of the `compute_vested()` function (overflow safety)
+- [ ] Formal verification of the `compute_vested()` function (overflow safety).
+      The boundary branches are modelled in `contracts/ophirpay/spec/src/invariants.rs`,
+      but the widened multiply path is not yet machine-checked — see the Kani
+      findings in [AUDIT.md](./AUDIT.md).
 - [ ] Third-party security audit before mainnet deployment
