@@ -343,12 +343,27 @@ helm upgrade --install ophirpay ./helm/ophirpay \
   --set image.tag=latest \
   --set ingress.hosts[0].host=ophirpay.com \
   --set config.NEXT_PUBLIC_STELLAR_NETWORK=PUBLIC \
-  --set config.NEXT_PUBLIC_HORIZON_URL=https://horizon.stellar.org \
-  --set config.NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban.stellar.org \
+  --set config.NEXT_PUBLIC_STELLAR_HORIZON_URL=https://horizon.stellar.org \
+  --set config.NEXT_PUBLIC_STELLAR_RPC_URL=https://soroban.stellar.org:443 \
   --set config.DATABASE_PROVIDER=postgresql \
   --set config.NODE_ENV=production \
   --wait
 ```
+
+> ⚠️ **`NEXT_PUBLIC_*` values are baked in at build time.** Next.js inlines them
+> into the JavaScript bundles during `next build`, so `config.NEXT_PUBLIC_*`
+> entries describe what the running image was built with — they cannot retarget
+> a prebuilt image. To switch networks, build your own image with those
+> variables supplied as build arguments and point the release at it via
+> `--set image.repository` / `--set image.tag`. `helm upgrade` prints the same
+> reminder through `helm/ophirpay/templates/NOTES.txt`.
+>
+> Non-`NEXT_PUBLIC_` variables (for example `STELLAR_NETWORK_PASSPHRASE`) *are*
+> read from the environment at runtime and may be set with
+> `--set config.STELLAR_NETWORK_PASSPHRASE=...`.
+>
+> Every key in `helm/ophirpay/values.yaml` must be a variable documented in
+> `.env.example`; `src/__tests__/helm-config.test.ts` fails the build otherwise.
 
 ### Verify
 
