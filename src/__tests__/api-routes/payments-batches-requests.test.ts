@@ -70,6 +70,18 @@ import { GET as getBatchById } from "@/app/api/batches/[id]/route";
 import { GET as getRequests, POST as postRequests } from "@/app/api/requests/route";
 import { generateCsrfToken } from "@/lib/csrf";
 import { CONTRACT_READER_ENTRY_CAP } from "@/lib/contracts";
+import { invalidateCaches } from "@/lib/api-cache";
+
+// Keep the real cache behaviour, but observe the invalidation calls a mutation
+// makes (#741).
+vi.mock("@/lib/api-cache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-cache")>();
+  return {
+    ...actual,
+    invalidateCache: vi.fn(actual.invalidateCache),
+    invalidateCaches: vi.fn(actual.invalidateCaches),
+  };
+});
 
 function csrfHeaders(): Record<string, string> {
   const token = generateCsrfToken();
@@ -161,6 +173,15 @@ describe("API Routes: Payments, Batches & Requests", () => {
         })
       );
       expect(res.status).toBe(201);
+
+      // Payment creation invalidates the read caches it changes (#741):
+      // aggregate stats, this user's analytics, and the audit ledger.
+      expect(vi.mocked(invalidateCaches)).toHaveBeenCalledWith([
+        { scope: "stats" },
+        { scope: "analytics", subject: MOCK_AUTH.userId },
+        { scope: "audit-log" },
+      ]);
+
       const data = await res.json();
       expect(data.data.id).toBe("p_new_1");
       expect(webhookDispatcher.dispatchWebhookEventAsync).toHaveBeenCalled();

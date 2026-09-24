@@ -89,7 +89,9 @@ export function successResponse<T>(
   data: T,
   meta?: ApiSuccess<T>["meta"],
   status = 200,
-  cacheHeader?: string
+  // A bare string sets `Cache-Control`; a record sets arbitrary response
+  // headers (e.g. `readCacheHeaders()` → Cache-Control + X-Cache-Status, #741).
+  cacheHeader?: string | Record<string, string>
 ) {
   const response = NextResponse.json(
     {
@@ -99,8 +101,12 @@ export function successResponse<T>(
     } satisfies ApiSuccess<T>,
     { status }
   );
-  if (cacheHeader) {
+  if (typeof cacheHeader === "string") {
     response.headers.set("Cache-Control", cacheHeader);
+  } else if (cacheHeader) {
+    for (const [key, value] of Object.entries(cacheHeader)) {
+      response.headers.set(key, value);
+    }
   }
   return response;
 }
