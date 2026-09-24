@@ -4,11 +4,12 @@ Thank you for your interest in contributing! OphirPay is an open-source payment 
 
 ## Getting Started
 
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/OphirPay.git`
-3. Install dependencies: `npm install`
-4. Set up the database: `npx prisma db push && npx prisma generate`
-5. Start the dev server: `npm run dev`
+1. Ensure you have Node.js 20 installed (see `.nvmrc`)
+2. Fork the repository
+3. Clone your fork: `git clone https://github.com/YOUR_USERNAME/OphirPay.git`
+4. Install dependencies: `npm install`
+5. Set up the database: `npx prisma db push && npx prisma generate`
+6. Start the dev server: `npm run dev`
 
 > 🛠️ **Setup trouble?** See the
 > [Troubleshooting Guide](docs/TROUBLESHOOTING.md) — it covers Freighter
