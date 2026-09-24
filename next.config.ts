@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
-// NOTE: the Content-Security-Policy is set per-request in src/middleware.ts
-// with a per-request nonce (Next.js reads it from the x-nonce request header
-// and applies it to its inline streaming/hydration scripts). A static CSP
-// cannot express that nonce, so it must NOT live here.
+// NOTE: the Content-Security-Policy is set per-request in src/proxy.ts
+// Note that 'unsafe-inline' is retained because the per-request nonce never
+// reaches the App Router renderer. A static CSP cannot express that nonce,
+// so it must NOT live here.
 //
 // NOTE: this file is the single source of truth for static security headers
 // (issue #681). vercel.json used to repeat the same headers over the
