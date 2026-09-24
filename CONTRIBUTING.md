@@ -31,37 +31,42 @@ Thank you for your interest in contributing! OphirPay is an open-source payment 
 
 Before adding or modifying an API endpoint, read the [API Endpoint Guide](docs/API_GUIDE.md). It documents the mandatory conventions: file structure, Zod validation, the error-handling pattern, auth middleware usage, the response envelope, rate-limit integration, a copy-pasteable worked example, and a pre-merge checklist.
 
-## 15-Job CI/CD Pipeline
+## CI/CD Pipeline
 
-Every PR triggers 15 independent CI/CD checks across quality, testing, security, and DevOps:
+Every PR triggers the following independent CI/CD checks across quality,
+testing, security, and DevOps. The jobs in `.github/workflows/ci.yml` are the
+merge gate, and `npm run ci` runs the same frontend chain locally
+(typecheck → lint → test → build → deploy-config guards) so the two cannot
+drift apart again.
 
-| # | Job | Runs on PR | Blocks merge |
+| # | Job (workflow) | Runs on PR | Blocks merge |
 |---|---|---|---|
-| 1 | Lint — ESLint | ✅ | ✅ Required |
-| 2 | TypeCheck — tsc | ✅ | ✅ Required |
-| 3 | Unit Tests — Vitest | ✅ | ✅ Required |
-| 4 | Coverage — Vitest (per-directory budgets) | ✅ | ✅ Required |
-| 5 | Contract WASM Build | ✅ | ✅ Required |
-| 6 | Next.js Build | ✅ | ✅ Required |
-| 7 | E2E — Chromium | ✅ | ✅ Required |
-| 8 | E2E — Firefox | ✅ | ✅ Required |
-| 9 | Prisma Validate | ✅ | ✅ Required |
-| 10 | Docker Build | ✅ | ⚠️ Informational |
-| 11 | K8s Validate | ✅ | ✅ Required |
-| 12 | Helm Lint | ✅ | ✅ Required |
-| 13 | Secret Scan — Gitleaks | ✅ | ✅ Required |
-| 14 | npm Audit | ✅ | ⚠️ Advisory |
-| 15 | PR Auto-Label | ✅ | ℹ️ No block |
+| 1 | `lint` — ESLint `--max-warnings 0` (`ci.yml`) | ✅ | ✅ Required |
+| 2 | `typecheck` — tsc (`ci.yml`) | ✅ | ✅ Required |
+| 3 | `unit-tests` — Vitest (`ci.yml`) | ✅ | ✅ Required |
+| 4 | `build` — Next.js production build (`ci.yml`) | ✅ | ✅ Required |
+| 5 | `contract-wasm` — Soroban WASM build + tests (`ci.yml`) | ✅ | ✅ Required |
+| 6 | `deploy-config` — deploy-script config guards (`ci.yml`) | ✅ | ✅ Required |
+| 7 | `secrets-scan` — Gitleaks (`ci.yml`) | ✅ | ✅ Required |
+| 8 | `helm-lint` — Helm lint + render (`ci.yml`) | ✅ | ✅ Required |
+| 9 | `prisma` — schema + migration replay (`prisma-ci.yml`) | ✅ (prisma paths) | ✅ Required |
+| 10 | `contract-regression` — WASM size guardrails (`contract-regression.yml`) | ✅ (contract paths) | ✅ Required |
+| 11 | `enforce-base` — integration-branch guard (`enforce-integration-branch.yml`) | ✅ | ✅ Required |
+
+> **Batch mode**: while the `integration/staging` branch exists, every PR must
+> target it instead of `main` (enforced by `enforce-integration-branch.yml`),
+> and `ci.yml` runs on PRs against that branch as well as `main`.
 
 ### Branch Protection Rules (recommended)
 
-Configure these in **Settings → Branches → Branch protection rules** for `main`:
+Configure these in **Settings → Branches → Branch protection rules** for `main`
+(and `integration/staging` while batch mode is active):
 
 - **Require a pull request before merging**: ✅
 - **Require approvals**: 1 minimum
 - **Dismiss stale pull request approvals when new commits are pushed**: ✅
 - **Require status checks to pass before merging**: ✅
-  - Required checks: `lint`, `typecheck`, `unit-tests`, `coverage`, `contract-wasm`, `next-build`, `e2e-chromium`, `e2e-firefox`, `prisma-validate`, `k8s-validate`, `helm-lint`, `secret-scan`
+  - Required checks: `lint`, `typecheck`, `unit-tests`, `build`, `contract-wasm`, `deploy-config`, `secrets-scan`, `helm-lint`
 - **Require conversation resolution before merging**: ✅
 - **Require signed commits**: Recommended
 - **Require linear history**: Recommended
@@ -69,19 +74,22 @@ Configure these in **Settings → Branches → Branch protection rules** for `ma
 
 ### Merge Requirements Summary
 
-> A PR must pass **12 of 15** checks (excludes npm audit, Docker build, PR labeler) and have at least **1 approving review** before it can be merged to `main`. Coverage is a blocking check — see [Coverage ratchet](#coverage-ratchet).
+> A PR must pass every required check above (and the path-scoped `prisma`,
+> `contract-regression` and `enforce-base` checks) and have at least
+> **1 approving review** before it can be merged.
 
 ## Testing
 
 ```bash
-npm test                 # Run all tests
-npm run test:watch       # Watch mode
-npm run coverage         # Coverage report + per-directory budgets (fails on regression)
-npm run typecheck        # TypeScript check
-npm run lint             # ESLint
-npm run test:openapi     # OpenAPI spec ↔ implementation conformance (drift)
-npm run test:visual       # Visual regression vs committed baselines (light + dark)
-npm run test:visual:update # Regenerate BOTH light and dark baselines
+npm test              # Run all tests (800 frontend)
+npm run test:watch    # Watch mode
+npm run coverage      # Coverage report
+npm run typecheck     # TypeScript check
+npm run lint          # ESLint
+npm run test:openapi  # OpenAPI spec ↔ implementation conformance (drift)
+npm run test:e2e      # E2E tests (requires a running server at E2E_BASE_URL)
+npm run test:visual   # Visual regression tests
+npm run test:visual:update # Update visual baselines
 ```
 
 ### Coverage ratchet
@@ -158,18 +166,20 @@ cd contracts/emitter && cargo test    # 6 emitter tests
 ```
 
 Contract WASM size is enforced in CI (hard limit: 128 KB per contract, the
-Soroban protocol limit) and a per-function gas report is uploaded as a build
-artifact — see the `contract-gas-report` job in `.github/workflows/ci.yml`.
+Soroban protocol limit) by the `contract-regression` job in
+`.github/workflows/contract-regression.yml`.
 
 ## Pull Request Process
 
-1. Create a branch from `main`: `feat/my-feature` or `fix/my-bug`
+1. Create a branch from the branch the issue targets (`main`, or
+   `integration/staging` while batch mode is active): `feat/my-feature` or
+   `fix/my-bug`
 2. Make your changes, following existing code conventions
 3. Run `npm run ci` locally to verify everything passes
-4. Push and open a PR — the 15-job CI pipeline runs automatically
-5. Ensure all 11 required checks pass (✅ green)
+4. Push and open a PR against that branch — CI runs automatically
+5. Ensure all required checks pass (✅ green)
 6. Request review from a maintainer (CODEOWNERS auto-assigns reviewers)
-7. Once approved and all checks pass, squash-merge to `main`
+7. Once approved and all checks pass, squash-merge to the target branch
 
 ## Issue Labels & Their Meanings
 
@@ -237,7 +247,7 @@ are the contract for payout — the PR must satisfy them exactly.
    conventions (Conventional Commits, `npm run ci` green, tests added).
 6. **Open the PR** referencing the issue with **`Closes #<number>`** in the
    description so the issue auto-closes on merge.
-7. **Make sure CI is green** — all 11 required checks must pass.
+7. **Make sure CI is green** — all required checks must pass.
 8. **Request review** from a maintainer and respond to feedback.
 9. **Merge** — once approved and merged, the bounty issue closes and payout is
    processed per the program's terms.
@@ -257,7 +267,7 @@ are the contract for payout — the PR must satisfy them exactly.
 
 A PR is **done** — ready for review and merge — when **all** of the following
 hold. This mirrors the [pull request template](.github/pull_request_template.md)
-and the 11 required CI checks.
+and the required CI checks listed above.
 
 ### Functional & code requirements
 
@@ -295,7 +305,7 @@ and the 11 required CI checks.
 - [ ] `npm run ci` passes locally (typecheck → lint → test → build)
 - [ ] PR description explains **what** changed and **why**, references the
       issue with `Closes #…`, and includes a test plan
-- [ ] All 11 required CI checks are green on the PR
+- [ ] All required CI checks are green on the PR
 - [ ] At least 1 maintainer approval obtained before merge
 
 > If any box can't be ticked, say so explicitly in the PR description with the
