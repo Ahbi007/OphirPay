@@ -286,7 +286,7 @@ and re-run the IP/hostname check against the final resolved address after follow
    overflowing product yields the exact vested value instead of `0`. Capping at
    `total_amount` was rejected: with `total_amount = i128::MAX` and a 4-second schedule it
    would vest the entire stream 2 seconds in, letting the recipient drain the contract.
-   `claim_stream` uses `checked_sub` and returns `StreamInvariantViolated` (305) if the
+   `claim_stream` uses `checked_sub` and returns `StreamInvariantViolated` (307) if the
    INV-5 ceiling is ever breached (#691).
 2. **`approve_refund` / `reject_refund` / `process_refund` lack `require_not_paused`** — refunds
    can settle during an emergency pause.

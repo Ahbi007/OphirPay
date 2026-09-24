@@ -334,8 +334,14 @@ const CONTRACT_ERROR_MAP: Record<string, string> = {
   "298": "Grace period active: transitional restrictions in effect",
   "299": "Configuration invalid: stored configuration is malformed",
   "300": "System fatal error: unrecoverable internal failure",
-  // ── Stream Accounting Guards (305) ──────────────────────
-  "305": "Stream accounting invariant violated: refused to pay an inconsistent amount",
+  "301": "Revocation not found",
+  "302": "Revocation not due",
+  "303": "Revocation already executed",
+  "304": "Cannot revoke self",
+  "305": "No pending ownership transfer",
+  "306": "Math overflow",
+  // ── Stream Accounting Guards (307) ──────────────────────
+  "307": "Stream accounting invariant violated: refused to pay an inconsistent amount",
 };
 
 /**

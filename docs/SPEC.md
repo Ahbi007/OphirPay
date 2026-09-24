@@ -114,7 +114,7 @@ a large stream) and MUST NOT cap it at `total_amount` (which would over-vest a
 stream that is only partially elapsed).
 
 `claim_stream()` computes `claimable = vested.checked_sub(stream.claimed_amount)`,
-returning `StreamInvariantViolated` (305) if the subtraction would be negative
+returning `StreamInvariantViolated` (307) if the subtraction would be negative
 and `StreamFullyClaimed` if `claimable == 0`.
 
 **Test:** `test_create_and_claim_stream` — verifies partial claims at 50% and
