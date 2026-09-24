@@ -112,6 +112,19 @@ const BUMP_MIN_TTL: u32 = 5_000;
 const BUMP_MAX_TTL: u32 = 50_000;
 const BUMP_MAINTENANCE_TTL: u32 = 100_000;
 
+// ── Enumeration Cap (docs/AUDIT.md MEDIUM-2, issue #742) ───────
+// Every *enumerating* reader is bounded by this many entries, newest first.
+// The upstream collections are only bounded by what a writer pushed into them
+// (a subscriber can register an unlimited number of hooks, and a batch written
+// before the `BatchTooLarge` guard existed can hold more ids than
+// `create_batch` accepts today), so without a cap a single read could walk an
+// arbitrarily long stored vector and exceed the instruction budget. Capping
+// turns that into a bounded result plus an explicit `truncated` flag instead of
+// an unreliable endpoint. Matches the existing 100-entry caps in
+// `get_audit_log_range`, `get_payments_range`, `get_fee_config_history` and
+// `get_reason_code_analytics`.
+const MAX_READER_ENTRIES: u32 = 100;
+
 // ── Data Types ─────────────────────────────────────────────────
 
 #[contracttype]
@@ -126,6 +139,20 @@ pub struct Payment {
     pub timestamp: u64,
     pub metadata: String,
     pub cancelled: bool,
+}
+
+/// Bounded, most-recent-first view of a batch's payments (#742).
+///
+/// `total` is the number of payment ids the batch actually holds and
+/// `truncated` is true when the reader had to stop before exhausting them, so
+/// callers can tell a complete list apart from a capped one instead of
+/// silently acting on partial data.
+#[contracttype]
+#[derive(Clone)]
+pub struct PaymentList {
+    pub items: Vec<Payment>,
+    pub total: u32,
+    pub truncated: bool,
 }
 
 /// An escrow that locks funds until released by the owner, claimed after
@@ -456,6 +483,17 @@ pub struct NotificationHook {
     pub webhook_url: String,
     pub active: bool,
     pub created_at: u64,
+}
+
+/// Bounded, most-recent-first view of a subscriber's notification hooks
+/// (#742). Mirrors [`PaymentList`] — see that type for the meaning of `total`
+/// and `truncated`.
+#[contracttype]
+#[derive(Clone)]
+pub struct HookList {
+    pub items: Vec<NotificationHook>,
+    pub total: u32,
+    pub truncated: bool,
 }
 
 #[contracterror]
@@ -4146,8 +4184,13 @@ impl OphirPayContract {
         results
     }
 
-    /// Get all hooks for a specific subscriber.
-    pub fn get_subscriber_hooks(env: Env, subscriber: Address) -> Vec<NotificationHook> {
+    /// Get a subscriber's hooks, most recently registered first.
+    ///
+    /// Bounded enumeration (#742): a subscriber can register an unbounded
+    /// number of hooks, so the read is capped at [`MAX_READER_ENTRIES`] and
+    /// reports whether it had to stop early — callers can then page or narrow
+    /// the query instead of treating an incomplete list as complete.
+    pub fn get_subscriber_hooks(env: Env, subscriber: Address) -> HookList {
         let sub_key = (Symbol::new(&env, "HOOK_SUB"), subscriber.clone());
         let hook_ids: Vec<u64> = env
             .storage()
@@ -4155,18 +4198,33 @@ impl OphirPayContract {
             .get(&sub_key)
             .unwrap_or(Vec::new(&env));
 
-        let mut hooks = Vec::new(&env);
-        for id in hook_ids.iter() {
+        let total = hook_ids.len();
+        let mut items = Vec::new(&env);
+        let mut scanned: u32 = 0;
+
+        for index in 0..total {
+            if items.len() >= MAX_READER_ENTRIES {
+                break;
+            }
+            scanned += 1;
+            // Newest first: `register_hook` appends, so the tail of the index
+            // vector holds the most recently created hooks.
+            let id = hook_ids.get(total - 1 - index).unwrap_or(0);
             if let Some(hook) = env
                 .storage()
                 .persistent()
                 .get::<_, NotificationHook>(&(HOOK_KEY, id))
             {
-                hooks.push_back(hook);
+                items.push_back(hook);
             }
         }
 
-        hooks
+        HookList {
+            items,
+            total,
+            // Exact: true only when the index vector was not fully walked.
+            truncated: scanned < total,
+        }
     }
 
     /// Get total registered hook count.
@@ -4316,20 +4374,41 @@ impl OphirPayContract {
         env.storage().instance().get(&BATCH_COUNT).unwrap_or(0)
     }
 
-    /// Get all payment IDs belonging to a batch, then fetch each payment.
-    pub fn get_payments_by_batch(env: Env, batch_id: u64) -> Vec<Payment> {
+    /// Get the payments belonging to a batch, most recent first.
+    ///
+    /// Bounded enumeration (#742): the batch's id vector is only as small as
+    /// the writer made it — batches created before the `BatchTooLarge` guard
+    /// can hold more than `create_batch` accepts today — so the read is capped
+    /// at [`MAX_READER_ENTRIES`] and reports truncation instead of walking the
+    /// whole vector inside a single invocation.
+    pub fn get_payments_by_batch(env: Env, batch_id: u64) -> PaymentList {
         let batch: Option<BatchPayment> = env.storage().persistent().get(&(BATCH_KEY, batch_id));
-        let mut payments = Vec::new(&env);
+        let mut items = Vec::new(&env);
+        let mut total: u32 = 0;
+        let mut scanned: u32 = 0;
 
         if let Some(b) = batch {
-            for pid in b.payment_ids.iter() {
-                if let Some(p) = env.storage().persistent().get(&(PAYMENT_KEY, pid)) {
-                    payments.push_back(p);
+            total = b.payment_ids.len();
+            for index in 0..total {
+                if items.len() >= MAX_READER_ENTRIES {
+                    break;
+                }
+                scanned += 1;
+                // Newest first: `create_batch` appends ids in creation order.
+                if let Some(pid) = b.payment_ids.get(total - 1 - index) {
+                    if let Some(p) = env.storage().persistent().get(&(PAYMENT_KEY, pid)) {
+                        items.push_back(p);
+                    }
                 }
             }
         }
 
-        payments
+        PaymentList {
+            items,
+            total,
+            // Exact: true only when the id vector was not fully walked.
+            truncated: scanned < total,
+        }
     }
 }
 
@@ -4881,9 +4960,11 @@ mod tests {
         assert_eq!(batch.total_recipients, 3);
         assert_eq!(batch.payment_ids.len(), 3);
 
-        // Query batch payments
+        // Query batch payments (#742: bounded, newest-first, with a flag)
         let batch_payments = client.get_payments_by_batch(&1);
-        assert_eq!(batch_payments.len(), 3);
+        assert_eq!(batch_payments.total, 3);
+        assert!(!batch_payments.truncated);
+        assert_eq!(batch_payments.items.len(), 3);
     }
 
     #[test]
@@ -5707,16 +5788,18 @@ mod tests {
         let hooks = client.get_hooks_by_event(&String::from_str(&env, "payment_recorded"));
         assert_eq!(hooks.len(), 1);
 
-        // Get subscriber hooks
+        // Get subscriber hooks (#742: bounded, newest-first, with a flag)
         let sub_hooks = client.get_subscriber_hooks(&subscriber);
-        assert_eq!(sub_hooks.len(), 1);
-        assert!(sub_hooks.get(0).unwrap().active);
+        assert_eq!(sub_hooks.total, 1);
+        assert!(!sub_hooks.truncated);
+        assert_eq!(sub_hooks.items.len(), 1);
+        assert!(sub_hooks.items.get(0).unwrap().active);
 
         // Unregister
         client.unregister_hook(&subscriber, &1);
 
         let sub_hooks = client.get_subscriber_hooks(&subscriber);
-        assert!(!sub_hooks.get(0).unwrap().active);
+        assert!(!sub_hooks.items.get(0).unwrap().active);
     }
 
     #[test]
@@ -6693,5 +6776,198 @@ mod tests {
         assert_eq!(p2.amount, 300);
         let b1 = client.get_batch(&1);
         assert_eq!(b1.total_amount, 200);
+    }
+
+    // ── Bounded readers (issue #742) ────────────────────────
+
+    /// A subscriber can register an unbounded number of hooks, so the reader
+    /// must cap the result and say so rather than walking the whole index.
+    #[test]
+    fn test_get_subscriber_hooks_caps_and_flags_truncation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(OphirPayContract, ());
+        let client = OphirPayContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let subscriber = Address::generate(&env);
+        let _ = client.init(&owner);
+
+        let overflow_count = MAX_READER_ENTRIES + 5;
+        for i in 0..overflow_count {
+            let hid = client.register_hook(
+                &subscriber,
+                &String::from_str(&env, "payment_recorded"),
+                &String::from_str(&env, "https://example.com/webhook"),
+            );
+            assert_eq!(hid, (i + 1) as u64);
+        }
+
+        let result = client.get_subscriber_hooks(&subscriber);
+
+        // Cap enforced, truncation reported, and the total stays accurate so a
+        // caller can page rather than guess.
+        assert_eq!(result.items.len(), MAX_READER_ENTRIES);
+        assert_eq!(result.total, overflow_count);
+        assert!(result.truncated);
+
+        // Most recent first: the last hook registered leads the list.
+        assert_eq!(result.items.get(0).unwrap().id, overflow_count as u64);
+        assert_eq!(
+            result
+                .items
+                .get(MAX_READER_ENTRIES - 1)
+                .unwrap()
+                .id,
+            (overflow_count - MAX_READER_ENTRIES + 1) as u64,
+        );
+    }
+
+    /// Exactly at the cap is a complete list, not a truncated one.
+    #[test]
+    fn test_get_subscriber_hooks_at_cap_is_not_truncated() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(OphirPayContract, ());
+        let client = OphirPayContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let subscriber = Address::generate(&env);
+        let _ = client.init(&owner);
+
+        for _ in 0..MAX_READER_ENTRIES {
+            client.register_hook(
+                &subscriber,
+                &String::from_str(&env, "refund_processed"),
+                &String::from_str(&env, "https://example.com/webhook"),
+            );
+        }
+
+        let result = client.get_subscriber_hooks(&subscriber);
+        assert_eq!(result.items.len(), MAX_READER_ENTRIES);
+        assert_eq!(result.total, MAX_READER_ENTRIES);
+        assert!(!result.truncated);
+    }
+
+    /// `create_batch` caps a batch at 100 recipients, but a batch written
+    /// before that guard existed can hold more ids than the writer accepts
+    /// today — the reader must still bound itself. The oversized record is
+    /// injected directly into storage to model exactly that legacy shape.
+    #[test]
+    fn test_get_payments_by_batch_caps_and_flags_truncation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000_000);
+        let contract_id = env.register(OphirPayContract, ());
+        let client = OphirPayContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let payee = Address::generate(&env);
+        let sac = create_token_contract(&env, &owner);
+        let _ = client.init(&owner);
+
+        let overflow_count: u64 = (MAX_READER_ENTRIES + 5) as u64;
+        for _ in 0..overflow_count {
+            client.record_payment(
+                &payer,
+                &payee,
+                &100i128,
+                &sac,
+                &String::from_str(&env, "tx_legacy"),
+                &String::from_str(&env, "legacy batch entry"),
+            );
+        }
+
+        let mut payment_ids = Vec::new(&env);
+        for id in 1..=overflow_count {
+            payment_ids.push_back(id);
+        }
+        let legacy_batch = BatchPayment {
+            id: 1,
+            creator: owner.clone(),
+            total_recipients: overflow_count as u32,
+            total_amount: (overflow_count as i128) * 100,
+            asset: sac.clone(),
+            timestamp: env.ledger().timestamp(),
+            tx_hash: String::from_str(&env, "legacy_batch_tx"),
+            payment_ids,
+        };
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&(BATCH_KEY, 1u64), &legacy_batch);
+        });
+
+        let result = client.get_payments_by_batch(&1);
+        assert_eq!(result.items.len(), MAX_READER_ENTRIES);
+        assert_eq!(result.total, overflow_count as u32);
+        assert!(result.truncated);
+        // Newest first: the last payment recorded leads the list.
+        assert_eq!(result.items.get(0).unwrap().id, overflow_count);
+        assert_eq!(
+            result.items.get(MAX_READER_ENTRIES - 1).unwrap().id,
+            overflow_count - (MAX_READER_ENTRIES as u64) + 1,
+        );
+    }
+
+    /// A batch the writer accepted today (≤ 100 recipients) is complete and
+    /// must not claim truncation — and an unknown batch must not either.
+    #[test]
+    fn test_get_payments_by_batch_within_cap_is_not_truncated() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(1_000_000);
+        let contract_id = env.register(OphirPayContract, ());
+        let client = OphirPayContractClient::new(&env, &contract_id);
+        let owner = Address::generate(&env);
+        let payer = Address::generate(&env);
+        let payee = Address::generate(&env);
+        let sac = create_token_contract(&env, &owner);
+        let _ = client.init(&owner);
+
+        // The batch record is written straight to storage rather than through
+        // `create_batch`: the writer emits one event per recipient and a
+        // 100-entry batch trips the *test host's* per-invocation event-size
+        // budget (soroban-env-host defaults), which has nothing to do with the
+        // reader boundary under test. Each `record_payment` is its own
+        // invocation, so the 100 payments themselves fit the budget.
+        for _ in 0..MAX_READER_ENTRIES {
+            client.record_payment(
+                &payer,
+                &payee,
+                &100i128,
+                &sac,
+                &String::from_str(&env, "tx_full"),
+                &String::from_str(&env, "full batch entry"),
+            );
+        }
+
+        let mut payment_ids = Vec::new(&env);
+        for id in 1..=(MAX_READER_ENTRIES as u64) {
+            payment_ids.push_back(id);
+        }
+        let full_batch = BatchPayment {
+            id: 1,
+            creator: owner.clone(),
+            total_recipients: MAX_READER_ENTRIES,
+            total_amount: (MAX_READER_ENTRIES as i128) * 100,
+            asset: sac.clone(),
+            timestamp: env.ledger().timestamp(),
+            tx_hash: String::from_str(&env, "full_batch_tx"),
+            payment_ids,
+        };
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&(BATCH_KEY, 1u64), &full_batch);
+        });
+
+        let result = client.get_payments_by_batch(&1);
+        assert_eq!(result.items.len(), MAX_READER_ENTRIES);
+        assert_eq!(result.total, MAX_READER_ENTRIES);
+        assert!(!result.truncated);
+
+        let missing = client.get_payments_by_batch(&999);
+        assert_eq!(missing.items.len(), 0);
+        assert_eq!(missing.total, 0);
+        assert!(!missing.truncated);
     }
 }

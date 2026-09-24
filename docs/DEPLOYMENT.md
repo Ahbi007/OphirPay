@@ -12,6 +12,7 @@
 - [Option 2: Docker](#-option-2-docker)
 - [Option 3: Standalone Node.js](#-option-3-standalone-nodejs)
 - [Option 4: Kubernetes (Helm)](#-option-4-kubernetes-helm)
+- [Cache Headers for Static Assets and APIs](#-cache-headers-for-static-assets-and-apis)
 - [Soroban Contract Deployment](#-soroban-contract-deployment)
 - [Database Setup](#-database-setup)
 - [Post-Deployment Verification](#-post-deployment-verification)
@@ -112,6 +113,10 @@ Push to main → Vercel builds → Preview/Production URL
 - **Preview**: Deploys from feature branches (PR comments include the preview URL)
 
 ### Vercel-Specific Notes
+
+> `vercel.json` deliberately declares **no** headers. The app layer
+> (`next.config.ts`) owns them all, so Vercel and self-hosted deployments
+> cannot drift apart — see [Cache Headers for Static Assets and APIs](#-cache-headers-for-static-assets-and-apis).
 
 - `output: "standalone"` is **disabled** on Vercel (detected via `process.env.VERCEL`) — Vercel uses its own runtime
 - `npx prisma generate` runs automatically during build (configured in `vercel.json` → `buildCommand`)
@@ -372,6 +377,50 @@ kubectl get pods -n ophirpay
 kubectl get ingress -n ophirpay
 curl https://ophirpay.com/api/health
 ```
+
+---
+
+## Cache Headers for Static Assets and APIs
+
+`next.config.ts` is the **single source of truth** for the static headers the
+app emits, including `Cache-Control`. Every target — Vercel, Docker, Helm and
+standalone Node — therefore serves identical headers. Do not re-declare these
+headers in `vercel.json`; `src/__tests__/security-headers.test.ts` fails the
+build if the two layers disagree (issues #681 and #740).
+
+| Path | `Cache-Control` | Why |
+|---|---|---|
+| `/_next/static/(.*)` | `public, max-age=31536000, immutable` | Build output is content-addressed: the filename changes when the bytes change, so a 1-year immutable TTL never serves stale code. |
+| `/_next/image` | `public, max-age=3600, stale-while-revalidate=86400` | The optimiser URL is stable but the underlying image can change, so it gets a short TTL plus a background revalidation window instead of a year. |
+| `/api/(.*)` | `no-cache, no-store, must-revalidate` | Never let a browser or intermediary replay financial data. |
+| everything else | *(none set)* | Next's defaults apply. |
+
+All of the above are in addition to the security header set declared on the
+`/(.*)` rule (`X-Content-Type-Options`, `X-Frame-Options`,
+`X-XSS-Protection: 0`, `Referrer-Policy`, `Permissions-Policy`,
+`Strict-Transport-Security`, `Cross-Origin-Opener-Policy`,
+`Cross-Origin-Resource-Policy`), which matches asset and API requests too.
+
+### Verify after deploying
+
+```bash
+# Hashed chunk → long-lived immutable
+curl -sI https://ophirpay.com/_next/static/chunks/main-app-abc123.js \
+  | grep -i cache-control
+# expect: cache-control: public, max-age=31536000, immutable
+
+# API → never cached
+curl -sI https://ophirpay.com/api/stats | grep -i cache-control
+# expect: cache-control: no-cache, no-store, must-revalidate
+
+# Security headers still present on an asset response
+curl -sI https://ophirpay.com/_next/static/chunks/main-app-abc123.js \
+  | grep -i 'x-content-type-options\|strict-transport-security'
+```
+
+> Self-hosted reverse proxies (nginx, Cloudflare, an ingress controller) must
+> not override these values. If you terminate TLS in front of the app, forward
+> the origin's `Cache-Control` untouched rather than setting your own.
 
 ---
 

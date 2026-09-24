@@ -14,6 +14,24 @@ import type { NextConfig } from "next";
 //
 // X-XSS-Protection is deliberately "0": the legacy IE/old-Chrome filter is
 // deprecated and has itself been abused for cross-site scripting.
+//
+// NOTE: this file is also the single source of truth for the *cache* policy of
+// framework-generated assets (issue #740). vercel.json used to be the only
+// place that knew about `/_next/static/(.*)` — the long-lived `immutable`
+// directive — so self-hosted targets (Docker, Kubernetes, `next start` /
+// standalone Node) served the same content-addressed chunks with no caching
+// hint at all and every repeat visit re-validated them. Declaring the rules
+// here means both Vercel and self-hosted deployments emit identical headers.
+
+// Hashed, content-addressed build output. The filename changes whenever the
+// bytes change, so a 1-year immutable TTL is safe.
+const IMMUTABLE_STATIC_CACHE = "public, max-age=31536000, immutable";
+
+// The optimised-image endpoint. The URL is stable but the underlying image can
+// change, so this needs a far shorter TTL than the chunk directory; the
+// stale-while-revalidate window keeps repeat views instant while the optimiser
+// refreshes in the background.
+const OPTIMIZED_IMAGE_CACHE = "public, max-age=3600, stale-while-revalidate=86400";
 
 const nextConfig: NextConfig = {
   // Standalone output — required by the Docker image (copies .next/standalone).
@@ -48,6 +66,14 @@ const nextConfig: NextConfig = {
         { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
         { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
       ],
+    },
+    {
+      source: "/_next/static/(.*)",
+      headers: [{ key: "Cache-Control", value: IMMUTABLE_STATIC_CACHE }],
+    },
+    {
+      source: "/_next/image",
+      headers: [{ key: "Cache-Control", value: OPTIMIZED_IMAGE_CACHE }],
     },
     {
       source: "/api/(.*)",
