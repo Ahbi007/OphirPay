@@ -55,6 +55,8 @@
     "audit:deps": "node scripts/audit-dependencies.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:visual": "playwright test -c playwright.visual.config.ts",
+    "test:visual:update": "playwright test -c playwright.visual.config.ts --update-snapshots",
     "test:a11y": "playwright test e2e/accessibility.spec.ts"
   },
   "dependencies": {
@@ -93,6 +95,7 @@
     "fast-check": "^3.23.2",
     "js-yaml": "^4.3.2",
     "jsdom": "^29.1.1",
+    "magicast": "^0.3.5",
     "prisma": "^6.5.0",
     "puppeteer": "^25.4.0",
     "tailwindcss": "^4.1.6",
