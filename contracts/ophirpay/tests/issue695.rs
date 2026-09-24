@@ -24,6 +24,9 @@ fn test_batch_math_overflow() {
     let asset = Address::generate(&env);
     let tx_hash = String::from_str(&env, "0xhash");
     
-    let err = client.try_create_batch(&owner, &payees, &amounts, &asset, &tx_hash).unwrap_err().unwrap();
-    assert_eq!(err, PaymentError::MathOverflow);
+    let res = client.try_create_batch(&owner, &payees, &amounts, &asset, &tx_hash);
+    match res {
+        Err(Ok(err)) => assert_eq!(err, PaymentError::MathOverflow),
+        _ => panic!("Expected MathOverflow error"),
+    }
 }
