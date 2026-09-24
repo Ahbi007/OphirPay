@@ -796,6 +796,8 @@ pub enum PaymentError {
     CannotRevokeSelf = 304,
     NoPendingOwner = 305,
     MathOverflow = 306,
+    // ── Stream Accounting Guards (307) ─────────────────────
+    StreamInvariantViolated = 307,
 }
 
 // ── Native Events ──────────────────────────────────────────────
@@ -997,7 +999,17 @@ fn release_reentrancy_lock(env: &Env) {
     env.storage().instance().set(&REENTRANCY_LOCK, &false);
 }
 
-/// Calculate linearly vested amount with overflow protection.
+/// Calculate the linearly vested amount without ever losing precision.
+///
+/// `total_amount * elapsed` can exceed `i128::MAX` for very large streams
+/// (AUDIT LOW-1). Returning `0` on overflow silently under-vests the recipient
+/// — the stream stops paying out exactly when the amount is large enough to
+/// matter. Capping at `total_amount` instead is just as wrong in the other
+/// direction: it would treat a barely-started stream as fully vested and let
+/// the recipient drain the contract (INV-5).
+///
+/// The multiply is therefore performed at 256-bit precision so the result is
+/// always the exact linear vesting value and can never exceed `total_amount`.
 fn compute_vested(total_amount: i128, start_time: u64, end_time: u64, now: u64) -> i128 {
     if now >= end_time {
         return total_amount;
@@ -1010,11 +1022,31 @@ fn compute_vested(total_amount: i128, start_time: u64, end_time: u64, now: u64) 
     if total_duration == 0 {
         return total_amount;
     }
-    // Checked multiply to prevent overflow; return 0 on overflow (safe default)
-    total_amount
-        .checked_mul(elapsed)
-        .map(|product| product / total_duration)
-        .unwrap_or(0)
+
+    if let Some(product) = total_amount.checked_mul(elapsed) {
+        return product / total_duration;
+    }
+
+    // The 128-bit product overflowed. `create_stream` rejects non-positive
+    // amounts, so `total_amount > 0`, and `now < end_time` guarantees
+    // `0 < elapsed < total_duration`. The exact result is therefore
+    //
+    //     floor(a * b / d) == (a / d) * b + floor((a % d) * b / d)
+    //
+    // with `a = total_amount`, `b = elapsed`, `d = total_duration`. Both `b`
+    // and `d` originate from u64 timestamps, so `(a % d) * b` fits in u128 and
+    // the sum is bounded by `total_amount` — no precision is lost and the
+    // INV-5 ceiling holds.
+    if total_amount <= 0 {
+        // Unreachable for streams; keeps the u128 casts below value-preserving.
+        return total_amount;
+    }
+    let amount = total_amount as u128;
+    let divisor = total_duration as u128;
+    let multiplier = elapsed as u128;
+    let whole = (amount / divisor) * multiplier;
+    let fractional = ((amount % divisor) * multiplier) / divisor;
+    (whole + fractional) as i128
 }
 
 // ── Contract ───────────────────────────────────────────────────
@@ -2741,7 +2773,7 @@ impl OphirPayContract {
     ) -> Result<(), PaymentError> {
         caller.require_auth();
         require_owner(&env, &caller)?;
-        let unlock_at = env.ledger().timestamp() + 86400; // 24 hours
+        let unlock_at = env.ledger().timestamp().saturating_add(TMLOCK_DELAY); // 24 hours
         env.storage().instance().set(&UPGRADE_HASH, &new_wasm_hash);
         env.storage().instance().set(&UPGRADE_TIMELOCK, &unlock_at);
         env.storage().instance().extend_ttl(BUMP_MIN_TTL, BUMP_MAX_TTL);
@@ -3396,7 +3428,13 @@ impl OphirPayContract {
         // Calculate vested amount linearly with overflow protection
         let vested = compute_vested(stream.total_amount, stream.start_time, stream.end_time, now);
 
-        let claimable = vested - stream.claimed_amount;
+        // INV-5: `vested` is monotonically non-decreasing over time and is the
+        // only value ever written to `claimed_amount`, so this subtraction must
+        // be non-negative. Check rather than wrap: an impossible negative (or
+        // wrapped) claimable would pay the recipient a nonsensical amount.
+        let claimable = vested
+            .checked_sub(stream.claimed_amount)
+            .ok_or(PaymentError::StreamInvariantViolated)?;
         if claimable <= 0 {
             return Err(PaymentError::StreamFullyClaimed);
         }
@@ -4705,6 +4743,103 @@ mod tests {
 
         let stream = client.get_stream(&1);
         assert!(stream.cancelled);
+    }
+
+    // ── Vesting Overflow (AUDIT LOW-1 / issue #691) ─────────
+
+    /// `i128::MAX * 2` overflows. The old code returned `0` here, silently
+    /// under-vesting a stream that is 50% through its schedule.
+    #[test]
+    fn test_compute_vested_overflow_is_exact_and_not_zero() {
+        let total = i128::MAX;
+        let start = 1_000u64;
+        let end = start + 4; // duration 4 seconds
+        let now = start + 2; // elapsed 2 seconds → exactly 50%
+
+        let vested = compute_vested(total, start, end, now);
+
+        assert!(vested > 0, "overflow must not collapse vesting to zero");
+        assert_eq!(vested, total / 2, "exact half of the stream must vest");
+        assert!(vested <= total, "vested amount must never exceed the total");
+    }
+
+    /// The widened multiply stays exact for quotients that are not a clean
+    /// fraction, and never exceeds the stream total (INV-5).
+    #[test]
+    fn test_compute_vested_overflow_is_bounded_and_monotonic() {
+        let total = i128::MAX;
+        let start = 0u64;
+        let end = 9u64;
+
+        assert_eq!(compute_vested(total, start, end, 3), total / 3);
+
+        let mut previous = 0i128;
+        for now in 1..=end {
+            let vested = compute_vested(total, start, end, now);
+            assert!(vested <= total, "vesting exceeded the stream total");
+            assert!(vested >= previous, "vesting must be non-decreasing");
+            previous = vested;
+        }
+        assert_eq!(previous, total);
+    }
+
+    /// `now >= end_time` short-circuits to the full amount even though the
+    /// multiply for a fully elapsed stream would overflow.
+    #[test]
+    fn test_compute_vested_overflow_fully_vests_at_end() {
+        let total = i128::MAX;
+        assert_eq!(compute_vested(total, 10, 20, 20), total);
+        assert_eq!(compute_vested(total, 10, 20, 1_000), total);
+    }
+
+    /// End-to-end: a stream whose vesting multiply overflows must still pay the
+    /// recipient the correct remaining balance at every step.
+    #[test]
+    fn test_claim_stream_with_overflowing_vesting_pays_correct_balance() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(OphirPayContract, ());
+        let client = OphirPayContractClient::new(&env, &contract_id);
+
+        let owner = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        let sac = create_token_contract(&env, &owner);
+        let sac_client = token::StellarAssetClient::new(&env, &sac);
+        sac_client.mint(&creator, &i128::MAX);
+
+        let now = env.ledger().timestamp();
+        let _ = client.init(&owner);
+
+        let stream_id = client.create_stream(
+            &creator,
+            &recipient,
+            &i128::MAX,
+            &sac,
+            &now,
+            &(now + 4),
+            &String::from_str(&env, "overflow"),
+        );
+        assert_eq!(stream_id, 1);
+
+        // 50% through: the multiply (`MAX * 2`) overflows i128.
+        env.ledger().set_timestamp(now + 2);
+        let first = client.claim_stream(&recipient, &1);
+        assert_eq!(first, i128::MAX / 2, "half of the stream must be claimable");
+        assert!(first > 0, "claim must not silently pay nothing");
+
+        // Fully vested: the remainder is exactly what has not been claimed.
+        env.ledger().set_timestamp(now + 10);
+        let second = client.claim_stream(&recipient, &1);
+        assert_eq!(second, i128::MAX - (i128::MAX / 2));
+
+        assert_eq!(client.get_stream(&1).claimed_amount, i128::MAX);
+        let token_client = token::Client::new(&env, &sac);
+        assert_eq!(token_client.balance(&recipient), i128::MAX);
+
+        // Nothing is left to claim and the stream is not over-paid.
+        let third = client.try_claim_stream(&recipient, &1);
+        assert!(third.is_err(), "a fully claimed stream must reject further claims");
     }
 
     // ── Batch Tests ────────────────────────────────────────

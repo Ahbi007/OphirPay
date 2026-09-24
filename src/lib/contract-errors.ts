@@ -340,6 +340,8 @@ const CONTRACT_ERROR_MAP: Record<string, string> = {
   "304": "Cannot revoke self",
   "305": "No pending ownership transfer",
   "306": "Math overflow",
+  // ── Stream Accounting Guards (307) ──────────────────────
+  "307": "Stream accounting invariant violated: refused to pay an inconsistent amount",
 };
 
 /**

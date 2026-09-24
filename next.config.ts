@@ -1,9 +1,19 @@
 import type { NextConfig } from "next";
 
-// NOTE: the Content-Security-Policy is set per-request in src/middleware.ts
-// with a per-request nonce (Next.js reads it from the x-nonce request header
-// and applies it to its inline streaming/hydration scripts). A static CSP
-// cannot express that nonce, so it must NOT live here.
+// NOTE: the Content-Security-Policy is set per-request in src/proxy.ts
+// Note that 'unsafe-inline' is retained because the per-request nonce never
+// reaches the App Router renderer. A static CSP cannot express that nonce,
+// so it must NOT live here.
+//
+// NOTE: this file is the single source of truth for static security headers
+// (issue #681). vercel.json used to repeat the same headers over the
+// `/(.*)` rule — with a contradictory `X-XSS-Protection: 1; mode=block` — so
+// the deployed policy depended on which layer applied last. Any header added
+// here must NOT be duplicated in vercel.json; src/__tests__/security-headers.test.ts
+// fails the build if it is.
+//
+// X-XSS-Protection is deliberately "0": the legacy IE/old-Chrome filter is
+// deprecated and has itself been abused for cross-site scripting.
 
 const nextConfig: NextConfig = {
   // Standalone output — required by the Docker image (copies .next/standalone).
