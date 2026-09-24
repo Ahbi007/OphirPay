@@ -26,10 +26,10 @@
       <img src="https://img.shields.io/github/actions/workflow/status/OphirPay/OphirPay/ci.yml?label=CI%20(22%20jobs)&logo=githubactions&logoColor=white" alt="CI — 22 jobs" />
     </a>
     <a href="#-testing--quality">
-      <img src="https://img.shields.io/badge/tests-970%20passed%20(806%20app%20%2B%2067%20contracts%20%2B%2097%20e2e)-brightgreen.svg" alt="970 Tests Passing" />
+      <img src="https://img.shields.io/badge/tests-2498%20passed%20(2334%20app%20%2B%2067%20contracts%20%2B%2097%20e2e)-brightgreen.svg" alt="2498 Tests Passing" />
     </a>
     <a href="#-testing--quality">
-      <img src="https://img.shields.io/badge/coverage-87.6%25%20overall-brightgreen.svg?logo=vitest" alt="87.6% Overall Coverage" />
+      <img src="https://img.shields.io/badge/coverage-68.6%25%20overall-brightgreen.svg?logo=vitest" alt="68.6% Overall Coverage" />
     </a>
     <a href="docs/AUDIT.md">
       <img src="https://img.shields.io/badge/audit-manual%20review%2C%202H%2F6M%20fixed-orange.svg" alt="Manual review — 2 High / 6 Medium fixed in code, 3rd-party audit pending" />
@@ -555,10 +555,12 @@ cd contracts/emitter && cargo test
 ## 📊 Testing & Quality
 
 ```bash
-# All app tests (806 cases across 33 suites)
+# All app tests (2,334 cases across 168 suites)
 npm test
 
-# Coverage report (87.6% overall — 87.0% statements / 82.3% branches / 92.1% functions / 89.1% lines)
+# Coverage report (68.6% overall — 69.8% statements / 66.4% branches / 67.1% functions / 71.3% lines)
+# Budgets are per-directory bands, not one global number: see vitest.config.ts
+# and the "Coverage ratchet" section of CONTRIBUTING.md.
 npm run coverage
 
 # E2E tests (97 cases across 7 Playwright specs)
@@ -568,9 +570,19 @@ npx playwright test
 npm run ci   # typecheck → lint → test → build
 ```
 
-### Unit Tests (Vitest) — 806 cases
+### Unit Tests (Vitest) — 2,334 cases
 
-All app tests live in `src/__tests__/` (33 files, 806 cases): auth & sessions, CSRF, API responses & branches, error codes, contract utilities & invocation, Stellar integration, transaction simulation, webhook URL guard & delivery, validation schemas, type guards, UI components, hooks, loading & error boundaries, and branch coverage suites.
+All app tests live in `src/__tests__/` (168 files, 2,334 cases): auth & sessions, CSRF, API responses & branches, error codes, contract utilities & invocation, Stellar integration, transaction simulation, webhook URL guard & delivery, validation schemas, type guards, UI components, hooks, loading & error boundaries, and branch coverage suites.
+
+### Coverage budgets (per-directory)
+
+Coverage measures `src/lib/**`, `src/components/**`, `src/hooks/**` and
+`src/app/**` (route handlers included once, as part of `src/app/**`). Instead of
+a single global 80% threshold there are documented bands — API/security, lib
+logic, and a UI floor — so a well-covered presentational module cannot subsidise
+a thinly-covered auth or webhook module. A file must clear every band it matches
+(the strictest wins). The bands are defined in `vitest.config.ts` and the ratchet
+policy is documented in [CONTRIBUTING.md](CONTRIBUTING.md#coverage-ratchet).
 
 ### E2E Tests (Playwright) — 97 cases
 
@@ -586,27 +598,42 @@ All app tests live in `src/__tests__/` (33 files, 806 cases): auth & sessions, C
 
 ### Visual Regression Tests (Playwright) — critical pages
 
-Screenshot-based visual coverage for the core pages (Dashboard, Send, Batches,
-Contracts) at desktop width, in both light and dark themes. Baselines live in
-`tests/visual/__screenshots__/` and are compared on every run.
+Screenshot-based visual coverage for the core pages at desktop width in **both
+light and dark themes**. Two Playwright projects drive the colour scheme —
+`visual-light` (`colorScheme: "light"`) and `visual-dark`
+(`colorScheme: "dark"`) — and every page is captured once per project, so the
+dark baselines are produced by the same code path as the light ones.
+
+Pages: **Dashboard**, **Payments list**, **Payments detail**, **Audit log**,
+**Analytics** (charts), Send, Batches and Contracts. The colour-sensitive
+components (status badges, payment timeline, analytics charts) are covered
+through their host pages; toasts are transient and are instead guarded by
+`src/__tests__/dark-mode-color-guard.test.ts`, which fails CI if a raw colour
+literal (e.g. `text-[#ff0000]`) is introduced.
+
+Baselines live in `tests/visual/__screenshots__/`, namespaced by project, and
+are compared on every run.
 
 ```bash
-# Compare the live render against committed baselines
+# Compare the live render against committed baselines (both themes)
 npm run test:visual
 
-# Intentionally update baselines (commit the regenerated PNG images)
+# Intentionally update baselines — regenerates BOTH light and dark PNGs
 npm run test:visual:update
 ```
 
 A committed change that alters a baseline beyond the configured pixel
 threshold (0.1% of pixels, set via the `maxDiffPixelRatio` option in
 `tests/visual/visual-regression.spec.ts`) fails the run and emits a diff
-artifact under `playwright-visual-report/`.
+artifact under `playwright-visual-report/`. The run also asserts the app
+actually switched theme (`html[data-theme]`) before capturing, so a light
+screenshot can never be committed as a dark baseline.
 
 **Updating baselines intentionally:** after a deliberate UI change, run
 `npm run test:visual:update`, review the regenerated screenshots in
-`tests/visual/__screenshots__/`, and commit them alongside the change. Never
-update baselines to mask an unintended regression.
+`tests/visual/__screenshots__/` (both the `visual-light/` and `visual-dark/`
+folders), and commit them alongside the change. Never update baselines to mask
+an unintended regression.
 
 ### Error Classification System
 

@@ -48,6 +48,25 @@ jobs:
       - run: npx vitest run --reporter=verbose
 
   # ══════════════════════════════════════════════════════════════
+  # 2b. COVERAGE — per-directory budgets (issues #713 / #714) + the
+  #     deterministic dark-mode colour guard (issue #715).
+  # ══════════════════════════════════════════════════════════════
+  coverage:
+    name: "3️⃣b Frontend — Coverage (Vitest)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: '.nvmrc', cache: "npm" }
+      - run: npm ci
+      - run: npx prisma generate
+      # Thresholds are per-directory bands (see vitest.config.ts + the
+      # "Coverage ratchet" section in CONTRIBUTING.md). A security module or
+      # route-handler group dropping below its band fails this job.
+      - run: npm run coverage
+
+  # ══════════════════════════════════════════════════════════════
   # 3. CONTRACT WASM BUILD — Build both Soroban contracts
   # ══════════════════════════════════════════════════════════════
   contract-wasm:
