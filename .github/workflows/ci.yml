@@ -232,6 +232,11 @@ jobs:
           HELM_VER=3.16.3
           curl -fsSL "https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz" | tar xz
           sudo mv linux-amd64/helm /usr/local/bin/helm
+      - name: Install kubeconform
+        run: |
+          KUBECONFORM_VER=0.6.7
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VER}/kubeconform-linux-amd64.tar.gz" | tar xz
+          sudo mv kubeconform /usr/local/bin/kubeconform
       - name: Lint the chart with default values
         run: helm lint helm/ophirpay --strict
       - name: Lint the chart with every feature flag enabled
@@ -294,4 +299,21 @@ jobs:
           reject "kind: ServiceAccount" /tmp/disabled.yaml
 
           exit "$fail"
+      
+      - name: Validate with kubeconform
+        run: |
+          kubeconform -strict -summary /tmp/enabled.yaml
+          kubeconform -strict -summary /tmp/disabled.yaml
+
+      - name: Assert ConfigMap keys against .env.example
+        run: |
+          # Extract keys from .env.example (ignore comments and empty lines)
+          grep -v '^#' .env.example | grep -v '^$' | cut -d= -f1 | sort > /tmp/env.keys
+          
+          # Render ConfigMap and extract keys
+          helm template ophirpay helm/ophirpay --show-only templates/config.yaml > /tmp/config.yaml
+          grep '  [A-Z_]*:' /tmp/config.yaml | awk -F':' '{print $1}' | sed 's/^[ \t]*//' | sort > /tmp/cm.keys
+          
+          # Compare the keys. If there's a difference, fail.
+          diff -u /tmp/env.keys /tmp/cm.keys || { echo "::error::ConfigMap keys do not match .env.example"; exit 1; }
 
