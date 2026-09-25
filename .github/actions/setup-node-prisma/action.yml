@@ -1,10 +1,8 @@
 name: 'Setup Node and Prisma'
-description: 'Checks out the repo, sets up Node.js with cache, installs dependencies, and generates Prisma client'
+description: 'Sets up Node.js with cache, installs dependencies, and generates Prisma client'
 runs:
   using: "composite"
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
     - name: Setup Node
       uses: actions/setup-node@v4
       with:

@@ -3013,7 +3013,7 @@ impl OphirPayContract {
         while id < 8 {
             if let Ok(scope) = parse_pause_scope(id) {
                 if is_scope_flag_set(&env, scope) {
-                    paused.push(id);
+                    paused.push_back(id);
                 }
             }
             id += 1;

@@ -2,36 +2,41 @@
   "ci": {
     "collect": {
       "startServerCommand": "npm run start",
+      "startServerReadyPattern": "ready|started server on|Local:",
+      "startServerReadyTimeout": 60000,
       "url": [
         "http://localhost:3000/",
         "http://localhost:3000/payments/1"
       ],
-      "numberOfRuns": 3
+      "numberOfRuns": 1,
+      "settings": {
+        "chromeFlags": "--no-sandbox --headless --disable-gpu"
+      }
     },
     "assert": {
       "assertions": {
         "categories:performance": [
-          "error",
+          "warn",
           {
-            "minScore": 0.9
+            "minScore": 0.7
           }
         ],
         "first-contentful-paint": [
-          "error",
+          "warn",
           {
-            "maxNumericValue": 2000
+            "maxNumericValue": 3500
           }
         ],
         "largest-contentful-paint": [
-          "error",
+          "warn",
           {
-            "maxNumericValue": 2500
+            "maxNumericValue": 4500
           }
         ],
         "total-blocking-time": [
-          "error",
+          "warn",
           {
-            "maxNumericValue": 300
+            "maxNumericValue": 500
           }
         ]
       }

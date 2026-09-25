@@ -1,13 +1,22 @@
 name: Lighthouse CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'lighthouserc.json'
+      - '.github/workflows/lighthouse.yml'
+
 jobs:
   lhci:
+    name: Lighthouse CI
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 18 }
-      - run: npm ci
+      - uses: ./.github/actions/setup-node-prisma
       - run: npm run build
       - name: Run Lighthouse CI
-        run: npx lhci autorun
+        run: npx @lhci/cli autorun
