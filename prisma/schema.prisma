@@ -96,7 +96,6 @@ model User {
   paymentRequests PaymentRequest[]
   /// Outgoing webhook subscriptions owned by the user (see Webhook).
   webhooks        Webhook[]
-  webhookDeliveries WebhookDelivery[]
   /// API keys issued for programmatic access (see ApiKey).
   apiKeys         ApiKey[]
   /// Refund ledger rows requested by the user (see Refund).
