@@ -1859,6 +1859,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
+  /api/health/live:
+    get:
+      tags: [Health]
+      summary: Liveness probe (process only)
+      description: >-
+        Lightweight liveness signal (issue #738): proves the Node process is up
+        and serving HTTP, with no database, Soroban RPC, Horizon or Redis I/O.
+        Orchestrators should wire this to `livenessProbe` / container
+        healthchecks so a transient dependency outage cannot restart-loop a
+        healthy container. The dependency-aware readiness check remains
+        `GET /api/health` (503 while the database is unreachable). Both paths
+        are exempt from the global rate limiter.
+      responses:
+        "200":
+          description: Process is alive and serving
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, data]
+                properties:
+                  success: { type: boolean, enum: [true] }
+                  data:
+                    type: object
+                    required: [status, probe, version]
+                    properties:
+                      status: { type: string, enum: [ok] }
+                      probe: { type: string, enum: [liveness] }
+                      version: { type: string }
+                      uptime:
+                        type: number
+                        description: Seconds since the process started
+                  meta:
+                    type: object
+                    properties:
+                      timestamp: { type: string, format: date-time }
+
   # ── Metrics ───────────────────────────────────────────────
   /api/metrics:
     get:
