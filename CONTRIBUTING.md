@@ -30,8 +30,17 @@ Thank you for your interest in contributing! OphirPay is an open-source payment 
 
 ### Dependency Updates
 
-Dependabot is configured to check for updates weekly across the `npm`, `cargo`, and `github-actions` ecosystems. Minor and patch updates are grouped to reduce PR volume. 
-When reviewing a Dependabot PR, ensure the CI checks pass. If there are breaking changes or failures, coordinate with the team before merging.
+[Dependabot](.github/dependabot.yml) checks the `npm` (root `package-lock.json`),
+`cargo` (`contracts/ophirpay` and `contracts/emitter`) and `github-actions`
+ecosystems once a week.
+
+- Minor and patch bumps in an ecosystem are grouped into a **single** PR; major
+  bumps arrive individually so they can be reviewed on their own.
+- Update PRs are labelled `dependencies` and use a `chore(deps)` commit prefix.
+- Review one like any other PR: wait for CI (the `contract-wasm` job matters for
+  Cargo bumps) and run it locally for security-sensitive packages. If a bump has
+  breaking changes or fails CI, coordinate with the team before merging instead
+  of force-landing it.
 
 ### Adding or changing an API endpoint
 
