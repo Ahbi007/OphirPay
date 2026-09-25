@@ -95,6 +95,7 @@ model User {
   paymentRequests PaymentRequest[]
   /// Outgoing webhook subscriptions owned by the user (see Webhook).
   webhooks        Webhook[]
+  webhookDeliveries WebhookDelivery[]
   /// API keys issued for programmatic access (see ApiKey).
   apiKeys         ApiKey[]
   /// Refund ledger rows requested by the user (see Refund).
@@ -451,9 +452,30 @@ model Webhook {
 
   /// Owner of this webhook (see User).
   user      User     @relation(fields: [userId], references: [id])
+  deliveries WebhookDelivery[]
 
   /// Speeds up "all webhooks for a user".
   @@index([userId])
+}
+
+model WebhookDelivery {
+  id           String   @id @default(cuid())
+  webhookId    String
+  event        String
+  targetUrl    String
+  canonicalBody String
+  requestBody  String
+  signature    String
+  requestHeaders String
+  test         Boolean  @default(false)
+  status       Int?
+  responseBody String?
+  durationMs   Int?
+  error        String?
+  createdAt    DateTime @default(now())
+  webhook      Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId, createdAt])
 }
 
 // ── Refunds ───────────────────────────────────────────────────

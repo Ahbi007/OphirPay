@@ -48,67 +48,120 @@ export function buildSignedPayload(
   return { body: JSON.stringify({ ...payload, signature }), signature };
 }
 
-/**
- * Deliver a webhook event to a registered endpoint with retries and signing.
- * Returns true if delivery was successful (2xx response).
- */
-export async function deliverWebhook(
+export interface WebhookRequestPreview {
+  canonicalBody: string;
+  body: string;
+  signature: string;
+  headers: Record<string, string>;
+}
+
+export function buildWebhookRequestPreview(
+  payload: WebhookPayload,
+  secret: string
+): WebhookRequestPreview {
+  const { body, signature } = buildSignedPayload(payload, secret);
+  return {
+    canonicalBody: JSON.stringify({ ...payload, signature: "" }),
+    body,
+    signature,
+    headers: {
+      "Content-Type": "application/json",
+      "X-OphirPay-Signature": signature,
+      "X-OphirPay-Event": payload.event,
+    },
+  };
+}
+
+export interface WebhookDeliveryResult {
+  delivered: boolean;
+  status: number | null;
+  responseBody: string;
+  durationMs: number;
+  blocked: boolean;
+  error: string | null;
+  request: WebhookRequestPreview;
+}
+
+export async function deliverWebhookWithDetails(
   url: string,
   secret: string,
   payload: WebhookPayload,
   maxRetries = 3
-): Promise<boolean> {
-  const { body, signature } = buildSignedPayload(payload, secret);
+): Promise<WebhookDeliveryResult> {
+  const request = buildWebhookRequestPreview(payload, secret);
   const totalAttempts = Number.isFinite(maxRetries)
     ? Math.max(1, Math.floor(maxRetries))
     : 1;
-
-  // Re-validate the destination at delivery time to mitigate DNS rebinding.
-  if (!(await isSafeWebhookUrlAtDelivery(url))) {
-    logger.error("Webhook delivery blocked — URL resolved to a private/internal address", { url });
+  const validation = await isSafeWebhookUrlAtDelivery(url);
+  if (!validation) {
+    const reason = "Webhook target was rejected by the URL guard before any request was made.";
+    logger.error("Webhook delivery blocked — URL failed validation", { url, reason });
     incMetric("webhooks_failed_total");
     incDeliveryFinalOutcome("webhook", 1, "failure");
-    return false;
+    return {
+      delivered: false,
+      status: null,
+      responseBody: "",
+      durationMs: 0,
+      blocked: true,
+      error: reason,
+      request,
+    };
   }
 
+  let lastError: string | null = null;
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     incDeliveryAttempt("webhook", attempt);
-
+    const startedAt = Date.now();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
+
     try {
-      // `redirect: "manual"` closes the SSRF redirect bypass: without it the
-      // default fetch behavior follows 3xx hops to internal addresses (e.g.
-      // http://169.254.169.254) even after the initial URL passed the guard.
       const response = await fetch(url, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-OphirPay-Signature": signature,
-          "X-OphirPay-Event": payload.event,
-        },
-        body,
+        headers: request.headers,
+        body: request.body,
         signal: controller.signal,
         redirect: "manual",
       });
+      const responseBody = typeof response.text === "function" ? await response.text() : "";
+      const durationMs = Date.now() - startedAt;
 
-      // Treat any redirect (3xx) as a failure — we never follow it, so the
-      // destination cannot be swapped for an internal address mid-delivery.
       if (response.ok) {
         logger.info("Webhook delivered", { url, event: payload.event, attempt });
         incMetric("webhooks_delivered_total");
         incDeliveryFinalOutcome("webhook", attempt, "success");
-        return true;
+        return {
+          delivered: true,
+          status: response.status,
+          responseBody,
+          durationMs,
+          blocked: false,
+          error: null,
+          request,
+        };
       }
 
+      lastError = `Endpoint returned HTTP ${response.status}.`;
       logger.warn("Webhook delivery failed", { url, status: response.status, attempt });
+      if (attempt === totalAttempts) {
+        return {
+          delivered: false,
+          status: response.status,
+          responseBody,
+          durationMs,
+          blocked: false,
+          error: lastError,
+          request,
+        };
+      }
     } catch (err) {
-      logger.warn("Webhook delivery error", { url, error: String(err), attempt });
+      lastError = String(err);
+      logger.warn("Webhook delivery error", { url, error: lastError, attempt });
     } finally {
       clearTimeout(timeout);
     }
 
-    // Exponential backoff: 1s, 2s, 4s
     if (attempt < totalAttempts) {
       await new Promise((r) => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
     }
@@ -117,5 +170,22 @@ export async function deliverWebhook(
   logger.error("Webhook delivery exhausted retries", { url, event: payload.event });
   incMetric("webhooks_failed_total");
   incDeliveryFinalOutcome("webhook", totalAttempts, "failure");
-  return false;
+  return {
+    delivered: false,
+    status: null,
+    responseBody: "",
+    durationMs: 0,
+    blocked: false,
+    error: lastError ?? "Webhook delivery failed.",
+    request,
+  };
+}
+
+export async function deliverWebhook(
+  url: string,
+  secret: string,
+  payload: WebhookPayload,
+  maxRetries = 3
+): Promise<boolean> {
+  return (await deliverWebhookWithDetails(url, secret, payload, maxRetries)).delivered;
 }
