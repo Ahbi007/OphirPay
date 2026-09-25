@@ -19,13 +19,6 @@ export interface WebhookDeliveryResult {
   latencyMs: number;
   attempts: number;
   errorMessage?: string;
-  delivered: boolean;
-  status: number | null;
-  responseBody: string;
-  durationMs: number;
-  blocked: boolean;
-  error: string | null;
-  request: WebhookRequestPreview;
 }
 
 export const WEBHOOK_TIMESTAMP_HEADER = "X-OphirPay-Timestamp";
@@ -73,6 +66,16 @@ export interface WebhookRequestPreview {
   headers: Record<string, string>;
 }
 
+export interface WebhookDeliveryDetails extends WebhookDeliveryResult {
+  delivered: boolean;
+  status: number | null;
+  responseBody: string;
+  durationMs: number;
+  blocked: boolean;
+  error: string | null;
+  request: WebhookRequestPreview;
+}
+
 export function buildWebhookRequestPreview(
   payload: WebhookPayload,
   secret: string
@@ -96,7 +99,7 @@ export async function deliverWebhook(
   secret: string,
   payload: WebhookPayload,
   maxRetries = 3
-): Promise<WebhookDeliveryResult> {
+): Promise<WebhookDeliveryDetails> {
   const startedAt = Date.now();
   const request = buildWebhookRequestPreview(payload, secret);
   let lastStatusCode: number | undefined;
@@ -200,6 +203,6 @@ export async function deliverWebhookWithDetails(
   secret: string,
   payload: WebhookPayload,
   maxRetries = 3
-): Promise<WebhookDeliveryResult> {
+): Promise<WebhookDeliveryDetails> {
   return deliverWebhook(url, secret, payload, maxRetries);
 }
