@@ -30,25 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version-file: '.nvmrc', cache: "npm" }
-      - run: npm ci
-      - run: npm run lint -- --max-warnings 0
-
-  # ══════════════════════════════════════════════════════════════
-  # 2. TYPECHECK — TypeScript strict type-checking
-  # ══════════════════════════════════════════════════════════════
-  typecheck:
-    name: "2️⃣ Frontend — TypeCheck (tsc)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version-file: '.nvmrc', cache: "npm" }
-      - run: npm ci
-      - run: npx prisma generate
+      - uses: ./.github/actions/setup-node-prisma
       - run: npx tsc --noEmit
 
   # ══════════════════════════════════════════════════════════════
