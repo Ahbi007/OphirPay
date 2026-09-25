@@ -998,6 +998,30 @@ paths:
           $ref: "#/components/responses/NotFound"
 
   /api/webhooks/{id}/test:
+    get:
+      tags: [Webhooks]
+      summary: Preview a signed webhook test request
+      security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: event
+          in: query
+          schema: { type: string }
+        - name: timestamp
+          in: query
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Exact canonical body, wire body, headers, and validated target URL
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     post:
       tags: [Webhooks]
       summary: Send a test webhook delivery
@@ -1076,6 +1100,28 @@ paths:
           description: Delivery history (original + replay attempts)
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/webhooks/{id}/deliveries/{deliveryId}:
+    get:
+      tags: [Webhooks]
+      summary: Get a webhook delivery record
+      security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: deliveryId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Full webhook delivery record, including request preview and response body
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/webhooks/{id}/deliveries/{deliveryId}/redeliver:
     post:

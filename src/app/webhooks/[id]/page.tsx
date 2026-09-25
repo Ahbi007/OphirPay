@@ -274,6 +274,7 @@ export default function WebhookDetailPage() {
               <dl className="mt-2 space-y-1 text-xs text-gray-600 dark:text-gray-300">
                 <div className="flex justify-between gap-3"><dt className="text-gray-400">Event</dt><dd className="font-mono">{result.event}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-gray-400">Latency</dt><dd>{result.durationMs} ms</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-gray-400">Test markers</dt><dd className="font-mono">test: true</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-gray-400">Response body</dt><dd className="text-right break-all">{result.responseBodyExcerpt || "(empty)"}</dd></div>
               </dl>
               {result.deliveryId && (
