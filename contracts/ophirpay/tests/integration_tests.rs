@@ -828,7 +828,7 @@ fn test_scoped_pause_blocks_only_that_scope() {
     let fix = TestFixture::new();
     let payer = Address::generate(&fix.env);
     let payee = Address::generate(&fix.env);
-    fix.mint(&payer, &1_000_000);
+    fix.mint(&payer, 1_000_000);
 
     // Pause only the Payments scope (id 0).
     fix.client.set_scope_paused(&fix.owner, &0u32, &true);
@@ -880,7 +880,7 @@ fn test_global_pause_overrides_scopes() {
     let fix = TestFixture::new();
     let payer = Address::generate(&fix.env);
     let payee = Address::generate(&fix.env);
-    fix.mint(&payer, &1_000_000);
+    fix.mint(&payer, 1_000_000);
 
     // No scope is individually paused before the emergency pause.
     assert_eq!(fix.client.get_paused_scopes().len(), 0);
