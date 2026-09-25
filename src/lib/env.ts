@@ -25,6 +25,8 @@ const envSchema = z.object({
   REDIS_URL: z.string().url().optional(),
   AUTH_SECRET: z.string().min(32).optional(), // required in production (see auth-session.ts)
   CRON_SECRET: z.string().min(16).optional(), // required for /api/cron (see app/api/cron/route.ts)
+  METRICS_TOKEN: z.string().min(16).optional(), // required to scrape /api/metrics (see app/api/metrics/route.ts)
+  WEBHOOK_ALLOWED_PORTS: z.string().optional(), // comma-separated webhook target ports (default 80,443)
   SCHEDULED_PAYMENTS_SOURCE_SECRET: z.string().optional(), // Stellar secret that signs scheduled payments
   NEXT_PUBLIC_DEMO_MODE: z.string().optional(),
   NEXT_PUBLIC_FEATURE_MULTI_ASSET: z.string().optional(),
@@ -56,6 +58,8 @@ export function validateEnv(): Env {
       AUTH_RATE_LIMIT_WALLET_RPM: process.env.AUTH_RATE_LIMIT_WALLET_RPM,
       REDIS_URL: process.env.REDIS_URL,
       CRON_SECRET: process.env.CRON_SECRET,
+      METRICS_TOKEN: process.env.METRICS_TOKEN,
+      WEBHOOK_ALLOWED_PORTS: process.env.WEBHOOK_ALLOWED_PORTS,
       SCHEDULED_PAYMENTS_SOURCE_SECRET: process.env.SCHEDULED_PAYMENTS_SOURCE_SECRET,
       NEXT_PUBLIC_FEATURE_MULTI_ASSET: process.env.NEXT_PUBLIC_FEATURE_MULTI_ASSET,
       NEXT_PUBLIC_FEATURE_WEBHOOKS: process.env.NEXT_PUBLIC_FEATURE_WEBHOOKS,

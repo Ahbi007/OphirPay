@@ -292,7 +292,9 @@ The 429 response uses the standard error envelope:
 
 The limit is configurable via the `RATE_LIMIT_RPM` environment variable
 (default: 120 requests per minute per IP). Health (`/api/health`) and metrics
-(`/api/metrics`) endpoints are excluded from rate limiting.
+(`/api/metrics`) endpoints are excluded from rate limiting. The metrics
+endpoint additionally requires `Authorization: Bearer $METRICS_TOKEN` — see
+[Per-Endpoint Metrics](./metrics-endpoints.md).
 
 ### Backing Off
 

@@ -22,6 +22,14 @@ export interface WebhookDeliveryResult {
 }
 
 /**
+ * Delivery error surfaced when the SSRF guard refuses a target. Kept
+ * descriptive so an operator can tell a blocked destination apart from a
+ * network failure (issue #706).
+ */
+export const BLOCKED_WEBHOOK_TARGET_ERROR =
+  "Webhook target rejected by the SSRF guard — URL resolves to a private/internal address or a disallowed port";
+
+/**
  * Generate HMAC-SHA256 signature for a webhook payload.
  * Receiving endpoints can verify authenticity by recomputing the signature.
  */
@@ -65,22 +73,34 @@ export async function deliverWebhook(
   const startedAt = Date.now();
   const { body, signature } = buildSignedPayload(payload, secret);
 
-  // Re-validate the destination at delivery time to mitigate DNS rebinding.
-  if (!(await isSafeWebhookUrlAtDelivery(url))) {
-    logger.error("Webhook delivery blocked — URL resolved to a private/internal address", { url });
-    incMetric("webhooks_failed_total");
-    return {
-      success: false,
-      attempts: 0,
-      latencyMs: Date.now() - startedAt,
-      errorMessage: "URL resolved to a private/internal address",
-    };
-  }
-
   let lastStatusCode: number | undefined;
   let lastError: string | undefined;
+  // Number of attempts actually made. A target refused on the first check
+  // records 0; a target that resolves privately on a later retry records the
+  // attempts already spent.
+  let attempts = 0;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    // Re-resolve and re-validate immediately before every attempt. DNS can
+    // change between registration and delivery (or between retries), so the
+    // allow/deny decision must be made against the address this attempt is
+    // about to connect to — not once per registration.
+    if (!(await isSafeWebhookUrlAtDelivery(url))) {
+      logger.error(
+        "Webhook delivery blocked — URL resolved to a private/internal address or a disallowed port",
+        { url, attempt }
+      );
+      incMetric("webhooks_failed_total");
+      return {
+        success: false,
+        statusCode: lastStatusCode,
+        latencyMs: Date.now() - startedAt,
+        attempts,
+        errorMessage: BLOCKED_WEBHOOK_TARGET_ERROR,
+      };
+    }
+
+    attempts = attempt;
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
