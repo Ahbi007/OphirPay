@@ -404,3 +404,7 @@ and the required CI checks listed above.
 ## Code of Conduct
 
 See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+
+## Pre-commit Hooks
+We use Husky to run lint-staged before commits. If you need to bypass it in an emergency, use `git commit --no-verify`.
