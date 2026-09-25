@@ -4,11 +4,12 @@ Thank you for your interest in contributing! OphirPay is an open-source payment 
 
 ## Getting Started
 
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/OphirPay.git`
-3. Install dependencies: `npm install`
-4. Set up the database: `npx prisma db push && npx prisma generate`
-5. Start the dev server: `npm run dev`
+1. Ensure you have Node.js 20 installed (see `.nvmrc`)
+2. Fork the repository
+3. Clone your fork: `git clone https://github.com/YOUR_USERNAME/OphirPay.git`
+4. Install dependencies: `npm install`
+5. Set up the database: `npx prisma db push && npx prisma generate`
+6. Start the dev server: `npm run dev`
 
 > 🛠️ **Setup trouble?** See the
 > [Troubleshooting Guide](docs/TROUBLESHOOTING.md) — it covers Freighter
@@ -26,6 +27,20 @@ Thank you for your interest in contributing! OphirPay is an open-source payment 
 - **Branch naming**: `feat/feature-name`, `fix/bug-description`, `docs/what-changed`, `ci/what-changed`, `test/what-changed`
 - **Commits**: Follow [Conventional Commits](https://www.conventionalcommits.org)
 - **Before submitting**: Run `npm run ci` (typecheck → lint → test → build)
+
+### Dependency Updates
+
+[Dependabot](.github/dependabot.yml) checks the `npm` (root `package-lock.json`),
+`cargo` (`contracts/ophirpay` and `contracts/emitter`) and `github-actions`
+ecosystems once a week.
+
+- Minor and patch bumps in an ecosystem are grouped into a **single** PR; major
+  bumps arrive individually so they can be reviewed on their own.
+- Update PRs are labelled `dependencies` and use a `chore(deps)` commit prefix.
+- Review one like any other PR: wait for CI (the `contract-wasm` job matters for
+  Cargo bumps) and run it locally for security-sensitive packages. If a bump has
+  breaking changes or fails CI, coordinate with the team before merging instead
+  of force-landing it.
 
 ### Adding or changing an API endpoint
 
@@ -91,6 +106,51 @@ npm run test:e2e      # E2E tests (requires a running server at E2E_BASE_URL)
 npm run test:visual   # Visual regression tests
 npm run test:visual:update # Update visual baselines
 ```
+
+### Coverage ratchet
+
+Coverage is enforced by **per-directory budgets**, not one global number
+(`vitest.config.ts`). A single 80% global threshold was simultaneously too
+strict for thin, presentational surface area and too lenient for the
+money-handling API and security modules: a well-covered component could
+subsidise a thinly-covered auth or webhook module and keep the aggregate green.
+
+The measured surface is `src/lib/**`, `src/components/**`, `src/hooks/**` and
+`src/app/**`. `src/app/api/**` is included exactly once, as part of
+`src/app/**` — do not add a second, overlapping include entry.
+
+| Band | Glob(s) | Baseline (st / br / fn / ln) | Budget |
+|---|---|---|---|
+| 1 · API route handlers | `src/app/api/**` | 71.3 / 68.9 / 70.4 / 74.4 | 71 / 68 / 70 / 74 |
+| 1 · Security modules | `src/lib/{auth-rate-limit,auth-session,challenge,csrf,csrf-route-registry,crypto,lookup-rate-limit,sanitize,session,validation-schemas,webhook-url-guard}.ts` | 90.4 / 90.1 / 94.1 / 92.5 | 90 / 89 / 93 / 92 |
+| 2 · Shared lib logic | `src/lib/**` | 87.8 / 84.7 / 91.2 / 89.2 | 87 / 84 / 90 / 89 |
+| 3 · UI components | `src/components/**` | 70.4 / 75.0 / 69.1 / 71.5 | 70 / 74 / 69 / 71 |
+| 3 · Hooks | `src/hooks/**` | 95.3 / 82.5 / 95.7 / 97.1 | 95 / 82 / 95 / 97 |
+| 3 · App pages | `src/app/**` | 55.2 / 52.5 / 43.6 / 56.9 | 55 / 52 / 43 / 56 |
+
+A file must clear **every band whose glob it matches**, so the strictest band
+wins. That is what makes a security module's budget bite even though it also
+sits inside the broader `src/lib/**` band.
+
+**The ratchet only turns one way: budgets may rise, never fall.** When a change
+raises a band's measured coverage, bump that band's numbers in
+`vitest.config.ts` in the same PR. Lowering a budget to make a red build green is
+a review-blocking change — fix the coverage or document the exception
+explicitly in the PR description instead. Baselines in the table above are
+refreshed whenever a band's budget moves.
+
+```bash
+# Run the gate locally exactly as CI does
+npm run coverage
+```
+
+### Dark-mode colour guard
+
+`src/__tests__/dark-mode-color-guard.test.ts` fails CI if the colour-critical
+components (status badges, toasts, the payment timeline, the analytics charts)
+introduce a raw colour literal such as `text-[#ff0000]` or
+`style={{ color: "#3b82f6" }}`. Use theme tokens (CSS variables) or a Tailwind
+pair (`text-red-500 dark:text-red-400`) so the colour adapts to dark mode.
 
 ## Changelog
 

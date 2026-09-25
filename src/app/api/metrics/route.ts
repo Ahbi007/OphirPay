@@ -126,8 +126,8 @@ function buildMetrics(): string {
         })}} ${metric.count}`
     ),
     "",
-    "# HELP ophirpay_db_query_duration_seconds_sum Database query duration sum",
-    "# TYPE ophirpay_db_query_duration_seconds_sum summary",
+    "# HELP ophirpay_db_query_duration_seconds Database query duration",
+    "# TYPE ophirpay_db_query_duration_seconds summary",
     `ophirpay_db_query_duration_seconds_sum ${c.db_query_duration_seconds_sum}`,
     `ophirpay_db_query_duration_seconds_count ${c.db_query_duration_seconds_count}`,
     "",
