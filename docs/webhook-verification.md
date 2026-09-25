@@ -264,6 +264,41 @@ def webhook():
 - [ ] Rotate the secret and re-verify on `401` — a mismatch means the
       delivery is not from OphirPay or was modified in transit.
 
+---
+
+## Delivery target policy (SSRF guard)
+
+OphirPay makes outbound `POST` requests to the URL you register, so the server
+refuses any target that could be used to reach its own network. A rejected
+target fails the delivery with a clear error —
+`"Webhook target rejected by the SSRF guard — URL resolves to a private/internal
+address or a disallowed port"` — rather than silently retrying.
+
+**Allowed:** `http` and `https` URLs on **port 80 or 443** (the scheme default
+when no port is given). Operators can extend the set with the comma-separated
+`WEBHOOK_ALLOWED_PORTS` environment variable (e.g. `WEBHOOK_ALLOWED_PORTS=80,443,8443`);
+anything not listed is rejected.
+
+**Blocked regardless of port:**
+
+| Category | Examples |
+|---|---|
+| Loopback | `127.0.0.0/8`, `::1` |
+| Private IPv4 | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` |
+| Link-local (cloud metadata) | `169.254.0.0/16`, `fe80::/10` |
+| Carrier-grade NAT | `100.64.0.0/10` |
+| Documentation / benchmarking / multicast / reserved | `192.0.2.0/24`, `198.51.100.0/24`, `203.0.113.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4` |
+| IPv6 ULA / multicast | `fc00::/7`, `ff00::/8` |
+| IPv4-mapped/compatible IPv6 whose embedded IPv4 is private | `::ffff:127.0.0.1`, `::ffff:10.0.0.1` |
+| Internal hostnames | `localhost`, `*.localhost`, `*.local`, `*.internal`, `*.lan`, `*.home.arpa`, `metadata.google.internal` |
+| Embedded credentials | `https://user:pass@host/hook` |
+
+**DNS rebinding:** the host is re-resolved and re-validated immediately before
+**every** delivery attempt, not once at registration. If a hostname resolves
+publicly when you register it but privately later, that attempt is refused.
+
+---
+
 ## Related docs
 
 - [Integration guide](integration-guide.md) — end-to-end setup

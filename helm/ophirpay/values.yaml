@@ -16,6 +16,22 @@ serviceAccount:
   annotations: {}
   name: ""
 
+# ── Metrics scraping ───────────────────────────────────────────
+# /api/metrics now requires a credential (see docs/metrics-endpoints.md):
+# `Authorization: Bearer <METRICS_TOKEN>`. The classic prometheus.io/* pod
+# annotations below cannot carry a header, so they only tell discovery where
+# the endpoint is — the scrape job itself MUST attach the bearer token from the
+# `ophirpay-secrets` Secret. Example Prometheus `additionalScrapeConfigs`:
+#
+#   - job_name: ophirpay
+#     metrics_path: /api/metrics
+#     authorization:
+#       type: Bearer
+#       credentials_file: /etc/prometheus/secrets/metrics-token
+#     static_configs:
+#       - targets: ["ophirpay.ophirpay.svc.cluster.local:80"]
+#
+# Or, with the Prometheus Operator, an Authorization/secret on the ServiceMonitor.
 podAnnotations:
   prometheus.io/scrape: "true"
   prometheus.io/port: "3000"
@@ -103,6 +119,9 @@ secrets:
   REDIS_URL: ""
   NEXT_PUBLIC_CONTRACT_ID: ""
   NEXT_PUBLIC_EMITTER_CONTRACT_ID: ""
+  # Shared bearer token the Prometheus scrape job must send to /api/metrics.
+  # Leave empty to deny all scrapes (fail-closed) until it is configured.
+  METRICS_TOKEN: ""
 
 livenessProbe:
   httpGet:
