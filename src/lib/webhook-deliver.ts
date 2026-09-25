@@ -34,30 +34,35 @@ export const BLOCKED_WEBHOOK_TARGET_ERROR =
  * Receiving endpoints can verify authenticity by recomputing the signature.
  */
 export function signWebhookPayload(payload: WebhookPayload, secret: string): string {
-  const body = JSON.stringify(payload);
-  return crypto.createHmac("sha256", secret).update(body).digest("hex");
+  const canonical = canonicalizeWebhookBody(payload);
+  return crypto
+    .createHmac("sha256", secret)
+    .update(webhookSignedInput(payload.timestamp, canonical))
+    .digest("hex");
 }
 
 /**
  * Build the exact HTTP body that will be transmitted and sign it, so a
  * receiver verifying the HMAC over the received body always matches.
  *
- * Canonicalization: the HMAC is computed over the body with the signature
- * field emptied — `JSON.stringify({...payload, signature: ""})`. A receiver
- * recomputes identically: parse the received body, empty the `signature`
- * field, re-serialize (stable key order), and compare against the
+ * Canonicalization: the HMAC is computed over
+ * `<timestamp>.<body with the signature field emptied>`. A receiver
+ * recomputes identically: take the `X-OphirPay-Timestamp` header value, parse
+ * the received body, empty the `signature` field, re-serialize (stable key
+ * order), prepend the timestamp and a dot, and compare against the
  * `X-OphirPay-Signature` header.
  */
 export function buildSignedPayload(
   payload: WebhookPayload,
   secret: string
-): { body: string; signature: string } {
-  const canonical = JSON.stringify({ ...payload, signature: "" });
+): { body: string; signature: string; timestamp: string } {
+  const timestamp = payload.timestamp;
+  const canonical = canonicalizeWebhookBody(payload);
   const signature = crypto
     .createHmac("sha256", secret)
-    .update(canonical)
+    .update(webhookSignedInput(timestamp, canonical))
     .digest("hex");
-  return { body: JSON.stringify({ ...payload, signature }), signature };
+  return { body: JSON.stringify({ ...payload, signature }), signature, timestamp };
 }
 
 /**
@@ -71,7 +76,7 @@ export async function deliverWebhook(
   maxRetries = 3
 ): Promise<WebhookDeliveryResult> {
   const startedAt = Date.now();
-  const { body, signature } = buildSignedPayload(payload, secret);
+  const { body, signature, timestamp } = buildSignedPayload(payload, secret);
 
   let lastStatusCode: number | undefined;
   let lastError: string | undefined;
@@ -111,6 +116,9 @@ export async function deliverWebhook(
           "Content-Type": "application/json",
           "X-OphirPay-Signature": signature,
           "X-OphirPay-Event": payload.event,
+          // Part of the signed material (see `webhookSignedInput`) — receivers
+          // use it for the replay-freshness window.
+          [WEBHOOK_TIMESTAMP_HEADER]: timestamp,
         },
         body,
         signal: controller.signal,

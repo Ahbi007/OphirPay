@@ -48,8 +48,9 @@ const crypto = require("crypto");
 const { PrismaClient } = require("@prisma/client");
 const prisma = new PrismaClient();
 (async () => {
-  const raw = `oph_${crypto.randomBytes(24).toString("hex")}`;
-  const keyHash = crypto.createHash("sha256").update(raw).digest("hex");
+  // 32 CSPRNG bytes (issue #701); store the version-tagged digest.
+  const raw = `oph_${crypto.randomBytes(32).toString("hex")}`;
+  const keyHash = `v1:${crypto.createHash("sha256").update(raw).digest("hex")}`;
   await prisma.apiKey.create({ data: { name: "load-test", keyHash, prefix: raw.slice(0, 8), userId: "<your-user-id>" } });
   console.log(raw);
   await prisma.$disconnect();

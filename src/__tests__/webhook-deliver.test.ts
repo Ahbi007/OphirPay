@@ -29,32 +29,70 @@ const samplePayload = {
   data: { id: "p_123", amount: 100 },
 };
 
+/** Receiver-side recomputation of the documented signature scheme. */
+function expectedSignature(payload: WebhookPayload, secret = SECRET): string {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(webhookSignedInput(payload.timestamp, canonicalizeWebhookBody(payload)))
+    .digest("hex");
+}
+
+/**
+ * Minimal receiver check mirroring docs/webhook-verification.md and the
+ * reference verifiers: verify the HMAC over `<timestamp>.<canonical body>`,
+ * then enforce the freshness window on the signed timestamp.
+ */
+function receiverVerify(
+  body: string,
+  signature: string,
+  secret: string,
+  nowMs: number,
+  maxAgeSeconds = WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS
+): string {
+  const parsed = JSON.parse(body) as WebhookPayload;
+  const canonical = JSON.stringify({ ...parsed, signature: "" });
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(`${parsed.timestamp}.${canonical}`)
+    .digest("hex");
+  if (expected !== signature) return "signature mismatch";
+  const ageSeconds = (nowMs - Date.parse(parsed.timestamp)) / 1000;
+  if (ageSeconds > maxAgeSeconds) return "payload too old — possible replay";
+  if (ageSeconds < -maxAgeSeconds) return "payload timestamp is in the future";
+  return "valid";
+}
+
 describe("signWebhookPayload", () => {
-  it("computes an HMAC-SHA256 over the JSON body", () => {
+  it("computes an HMAC-SHA256 over `<timestamp>.<canonical body>`", () => {
     const sig = signWebhookPayload(samplePayload, SECRET);
     expect(sig).toMatch(/^[a-f0-9]{64}$/);
+    expect(sig).toBe(expectedSignature(samplePayload));
     // Deterministic for the same input+secret
     expect(signWebhookPayload(samplePayload, SECRET)).toBe(sig);
     // Different secret => different signature
     expect(signWebhookPayload(samplePayload, "other-secret")).not.toBe(sig);
+  });
+
+  it("changes when the timestamp changes (the timestamp is signed)", () => {
+    const later = { ...samplePayload, timestamp: "2026-08-14T00:00:01Z" };
+    expect(signWebhookPayload(later, SECRET)).not.toBe(
+      signWebhookPayload(samplePayload, SECRET)
+    );
   });
 });
 
 describe("buildSignedPayload", () => {
   it("produces a body whose signature a receiver can verify (empty-and-reserialize canonicalization)", () => {
     const { body, signature } = buildSignedPayload(samplePayload, SECRET);
-    const parsed = JSON.parse(body);
-    // Receiver-side verification: parse the received body, empty the
-    // signature field, re-serialize (stable key order) and recompute the HMAC.
     const received = JSON.parse(body);
     const stripped = { ...received, signature: "" };
     const canonical = JSON.stringify(stripped);
     const expected = crypto
       .createHmac("sha256", SECRET)
-      .update(canonical)
+      .update(`${samplePayload.timestamp}.${canonical}`)
       .digest("hex");
     expect(signature).toBe(expected);
-    expect(parsed.signature).toBe(signature);
+    expect(received.signature).toBe(signature);
   });
 
   it("signs over the body with the signature field emptied (not the raw payload)", () => {
@@ -62,12 +100,57 @@ describe("buildSignedPayload", () => {
     const canonical = JSON.stringify({ ...samplePayload, signature: "" });
     const expected = crypto
       .createHmac("sha256", SECRET)
-      .update(canonical)
+      .update(`${samplePayload.timestamp}.${canonical}`)
       .digest("hex");
     expect(signature).toBe(expected);
     // The transmitted body carries the real signature (not the empty one).
     expect(JSON.parse(body).signature).toBe(signature);
     expect(body).not.toBe(canonical);
+  });
+
+  it("returns the signed timestamp so callers can set the header", () => {
+    const { timestamp } = buildSignedPayload(samplePayload, SECRET);
+    expect(timestamp).toBe(samplePayload.timestamp);
+  });
+
+  it("rejects a delivery re-dated by editing the timestamp header", () => {
+    const { body, signature } = buildSignedPayload(samplePayload, SECRET);
+    // An attacker captures the body+signature and rewrites the timestamp to
+    // "now"; the signature no longer matches because the timestamp is signed.
+    const canonical = JSON.stringify({ ...samplePayload, signature: "" });
+    const forged = crypto
+      .createHmac("sha256", SECRET)
+      .update(`${new Date().toISOString()}.${canonical}`)
+      .digest("hex");
+    expect(forged).not.toBe(signature);
+    // The genuine (fresh at receipt time) delivery still verifies.
+    expect(
+      receiverVerify(body, signature, SECRET, Date.parse(samplePayload.timestamp) + 1000)
+    ).toBe("valid");
+  });
+});
+
+describe("replay window", () => {
+  it("accepts a signature inside the freshness window", () => {
+    const { body, signature } = buildSignedPayload(samplePayload, SECRET);
+    const receivedAt = Date.parse(samplePayload.timestamp) + 30_000; // 30s later
+    expect(receiverVerify(body, signature, SECRET, receivedAt)).toBe("valid");
+  });
+
+  it("rejects a stale signature outside the freshness window", () => {
+    const { body, signature } = buildSignedPayload(samplePayload, SECRET);
+    const receivedAt = Date.parse(samplePayload.timestamp) + 3600_000; // 1h later
+    expect(receiverVerify(body, signature, SECRET, receivedAt)).toContain(
+      "too old"
+    );
+  });
+
+  it("rejects a future-dated signature beyond the clock-skew allowance", () => {
+    const { body, signature } = buildSignedPayload(samplePayload, SECRET);
+    const receivedAt = Date.parse(samplePayload.timestamp) - 3600_000;
+    expect(receiverVerify(body, signature, SECRET, receivedAt)).toContain(
+      "future"
+    );
   });
 });
 
@@ -87,7 +170,7 @@ describe("deliverWebhook", () => {
     globalThis.fetch = originalFetch;
   });
 
-  it("sends the signed body and does not follow redirects (SSRF guard)", async () => {
+  it("sends the signed body, the timestamp header, and does not follow redirects (SSRF guard)", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -104,7 +187,11 @@ describe("deliverWebhook", () => {
     const body = JSON.parse(String(init.body));
     expect(body.event).toBe("payment.created");
     expect(body.signature).toMatch(/^[a-f0-9]{64}$/);
-    expect((init.headers as Record<string, string>)["X-OphirPay-Signature"]).toBe(body.signature);
+    const headers = init.headers as Record<string, string>;
+    expect(headers["X-OphirPay-Signature"]).toBe(body.signature);
+    // Issue #702: the timestamp travels in a dedicated, signed header.
+    expect(headers[WEBHOOK_TIMESTAMP_HEADER]).toBe(samplePayload.timestamp);
+    expect(body.timestamp).toBe(samplePayload.timestamp);
     expect(ok.attempts).toBe(1);
     expect(ok.latencyMs).toBeGreaterThanOrEqual(0);
   });
