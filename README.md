@@ -691,7 +691,10 @@ Path-scoped workflows add Prisma schema/migration replay
 the integration-branch guard (`enforce-integration-branch.yml`), dependency
 scanning (`dependency-scan.yml`), PR auto-labeling (`pr-labeler.yml`),
 security scorecard (`scorecard.yml`), issue staleness (`stale.yml`), database
-backups (`db-backup.yml`), and scheduled payments (`scheduled-payments-cron.yml`).
+backups (`db-backup.yml`), scheduled payments (`scheduled-payments-cron.yml`),
+the nightly E2E suite (`e2e-nightly.yml`), the Docker image smoke test
+(`docker-smoke.yml`), and the weekly load-test baseline gate (`load-test.yml`, see
+[docs/PERFORMANCE.md](docs/PERFORMANCE.md)).
 
 **→ [View the latest core CI run](https://github.com/OphirPay/OphirPay/actions/workflows/ci.yml)**
 
