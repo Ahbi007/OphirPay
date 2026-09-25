@@ -29,10 +29,15 @@ import {
   requireAuth,
   withApiAuth,
   hashApiKey,
+  hashApiKeyV1,
   deriveKeyPrefix,
 } from "@/lib/api-auth";
 
-function requestWithKey(key = "oph_livekeyvalue"): Request {
+// Current key format: `oph_` + 32 CSPRNG bytes as lowercase hex (#701). Only
+// this shape (and the legacy 24-byte one) is accepted at auth time.
+const RAW_KEY = `oph_${"0123456789abcdef".repeat(4)}`;
+
+function requestWithKey(key = RAW_KEY): Request {
   return new Request("http://localhost/api/payments", {
     headers: { authorization: `Bearer ${key}` },
   });
@@ -62,10 +67,10 @@ describe("authenticateRequest", () => {
     expect(mocks.findFirst).not.toHaveBeenCalled();
   });
 
-  it("looks the key up by hash + prefix and returns the auth result", async () => {
+  it("looks the key up by prefix and both accepted digests", async () => {
     mocks.findFirst.mockResolvedValue(storedKey());
 
-    const result = await authenticateRequest(requestWithKey("oph_livekeyvalue"));
+    const result = await authenticateRequest(requestWithKey());
 
     expect(result).toEqual({
       userId: "user_1",
@@ -74,10 +79,12 @@ describe("authenticateRequest", () => {
       scopes: ["read:payments"],
     });
 
+    // `in` carries the current `v1:` digest first, then the pre-#701 bare
+    // digest, so keys minted before #701 keep authenticating.
     expect(mocks.findFirst).toHaveBeenCalledWith({
       where: {
-        keyHash: hashApiKey("oph_livekeyvalue"),
-        prefix: deriveKeyPrefix("oph_livekeyvalue"),
+        keyHash: { in: [hashApiKeyV1(RAW_KEY), hashApiKey(RAW_KEY)] },
+        prefix: deriveKeyPrefix(RAW_KEY),
       },
       select: { id: true, userId: true, name: true, expiresAt: true, scopes: true },
     });
@@ -85,6 +92,11 @@ describe("authenticateRequest", () => {
     // lastUsed / request log are fire-and-forget writes.
     expect(mocks.update).toHaveBeenCalled();
     expect(mocks.logCreate).toHaveBeenCalledWith({ data: { keyId: "key_1" } });
+  });
+
+  it("rejects malformed key material before touching the database", async () => {
+    expect(await authenticateRequest(requestWithKey("oph_livekeyvalue"))).toBeNull();
+    expect(mocks.findFirst).not.toHaveBeenCalled();
   });
 
   it("defaults a null scopes column to an empty array", async () => {
