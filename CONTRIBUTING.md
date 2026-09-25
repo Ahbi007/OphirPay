@@ -144,6 +144,27 @@ refreshed whenever a band's budget moves.
 npm run coverage
 ```
 
+### Bundle-size budget
+
+The client JavaScript has a committed per-route budget in
+[`bundle-budget.json`](bundle-budget.json), enforced in CI by
+`scripts/check-bundle-budget.mjs` after the production build. The script reads
+the App Router client-reference manifests (`.next/server/app/**`), unions each
+route's first-load chunks, gzip-sizes them and fails with a per-route breakdown
+when a route exceeds its budget. The table is also appended to the GitHub job
+summary so reviewers see the delta on every PR.
+
+```bash
+npm run build         # produces .next
+npm run bundle:check  # enforce the committed budgets
+
+# Interactive treemap (opt-in; webpack-only, so it does not affect normal builds)
+npm run analyze       # writes .next/analyze/*.html
+```
+
+Budgets are raised **deliberately** in a PR, with a reason. Do not bump a budget
+just to make a red build green — trim the route instead.
+
 ### Dark-mode colour guard
 
 `src/__tests__/dark-mode-color-guard.test.ts` fails CI if the colour-critical

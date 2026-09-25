@@ -26,10 +26,10 @@
       <img src="https://img.shields.io/github/actions/workflow/status/OphirPay/OphirPay/ci.yml?label=CI&logo=githubactions&logoColor=white" alt="CI" />
     </a>
     <a href="#-testing--quality">
-      <img src="https://img.shields.io/badge/tests-2498%20passed%20(2334%20app%20%2B%2067%20contracts%20%2B%2097%20e2e)-brightgreen.svg" alt="2498 Tests Passing" />
+      <img src="https://img.shields.io/badge/tests-2738%20passed%20(2574%20app%20%2B%2067%20contracts%20%2B%2097%20e2e)-brightgreen.svg" alt="2738 Tests Passing" />
     </a>
     <a href="#-testing--quality">
-      <img src="https://img.shields.io/badge/coverage-68.6%25%20overall-brightgreen.svg?logo=vitest" alt="68.6% Overall Coverage" />
+      <img src="https://img.shields.io/badge/coverage-68.9%25%20overall-brightgreen.svg?logo=vitest" alt="68.9% Overall Coverage" />
     </a>
     <a href="docs/AUDIT.md">
       <img src="https://img.shields.io/badge/audit-manual%20review%2C%202H%2F6M%20fixed-orange.svg" alt="Manual review — 2 High / 6 Medium fixed in code, 3rd-party audit pending" />
@@ -555,10 +555,10 @@ cd contracts/emitter && cargo test
 ## 📊 Testing & Quality
 
 ```bash
-# All app tests (2,334 cases across 168 suites)
+# All app tests (2,574 cases across 185 suites)
 npm test
 
-# Coverage report (68.6% overall — 69.8% statements / 66.4% branches / 67.1% functions / 71.3% lines)
+# Coverage report (68.9% overall — 70.2% statements / 66.8% branches / 67.2% functions / 71.5% lines)
 # Budgets are per-directory bands, not one global number: see vitest.config.ts
 # and the "Coverage ratchet" section of CONTRIBUTING.md.
 npm run coverage
@@ -569,14 +569,18 @@ npx playwright test
 # Full CI pipeline
 npm run ci   # typecheck → lint → test → build
 
+# Bundle analysis (opt-in webpack treemap) and committed size budget
+npm run analyze       # writes .next/analyze/*.html
+npm run bundle:check  # enforce bundle-budget.json (runs in CI on every build)
+
 # Visual Regression
 npm run test:visual        # Compare against baselines
 npm run test:visual:update # Update baselines
 ```
 
-### Unit Tests (Vitest) — 2,334 cases
+### Unit Tests (Vitest) — 2,574 cases
 
-All app tests live in `src/__tests__/` (168 files, 2,334 cases): auth & sessions, CSRF, API responses & branches, error codes, contract utilities & invocation, Stellar integration, transaction simulation, webhook URL guard & delivery, validation schemas, type guards, UI components, hooks, loading & error boundaries, and branch coverage suites.
+All app tests live in `src/__tests__/` (185 files, 2,574 cases): auth & sessions, CSRF, API responses & branches, error codes, contract utilities & invocation, Stellar integration, transaction simulation, webhook URL guard & delivery, validation schemas, type guards, UI components, hooks, loading & error boundaries, and branch coverage suites.
 
 ### Coverage budgets (per-directory)
 
