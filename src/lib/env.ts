@@ -27,6 +27,8 @@ const envSchema = z.object({
   // validator owns the "generate one with openssl rand -hex 32" message.
   AUTH_SECRET: z.string().optional(),
   CRON_SECRET: z.string().min(16).optional(), // required for /api/cron (see app/api/cron/route.ts)
+  METRICS_TOKEN: z.string().min(16).optional(), // required to scrape /api/metrics (see app/api/metrics/route.ts)
+  WEBHOOK_ALLOWED_PORTS: z.string().optional(), // comma-separated webhook target ports (default 80,443)
   SCHEDULED_PAYMENTS_SOURCE_SECRET: z.string().optional(), // Stellar secret that signs scheduled payments
   NEXT_PUBLIC_DEMO_MODE: z.string().optional(),
   NEXT_PUBLIC_FEATURE_MULTI_ASSET: z.string().optional(),
@@ -141,6 +143,8 @@ export function validateEnv(): Env {
       AUTH_SECRET: process.env.AUTH_SECRET,
       NEXT_PUBLIC_DEMO_MODE: process.env.NEXT_PUBLIC_DEMO_MODE,
       CRON_SECRET: process.env.CRON_SECRET,
+      METRICS_TOKEN: process.env.METRICS_TOKEN,
+      WEBHOOK_ALLOWED_PORTS: process.env.WEBHOOK_ALLOWED_PORTS,
       SCHEDULED_PAYMENTS_SOURCE_SECRET: process.env.SCHEDULED_PAYMENTS_SOURCE_SECRET,
       NEXT_PUBLIC_FEATURE_MULTI_ASSET: process.env.NEXT_PUBLIC_FEATURE_MULTI_ASSET,
       NEXT_PUBLIC_FEATURE_WEBHOOKS: process.env.NEXT_PUBLIC_FEATURE_WEBHOOKS,

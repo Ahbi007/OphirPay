@@ -277,7 +277,9 @@ How it works:
 - **Per-IP sliding window**: `X` requests per minute per client IP
   (`RATE_LIMIT_RPM` env var, default `120`).
 - **Exempt paths**: `/api/health` and `/api/metrics` are never throttled
-  (monitoring endpoints are hit frequently by orchestrators).
+  (monitoring endpoints are hit frequently by orchestrators). `/api/metrics`
+  is still **authenticated** — it requires `Authorization: Bearer
+  $METRICS_TOKEN` (see [Per-Endpoint Metrics](./metrics-endpoints.md)).
 - **Headers** on every API response:
   `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
 - **On exceed**: `429` with `Retry-After` and body

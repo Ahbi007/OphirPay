@@ -3,19 +3,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
 
+const { isSafeWebhookUrlAtDeliveryMock } = vi.hoisted(() => ({
+  isSafeWebhookUrlAtDeliveryMock: vi.fn(),
+}));
+
 vi.mock("@/lib/webhook-url-guard", () => ({
-  isSafeWebhookUrlAtDelivery: vi.fn(async (url: string) => !url.includes("127.0.0.1")),
+  isSafeWebhookUrlAtDelivery: isSafeWebhookUrlAtDeliveryMock,
 }));
 
 import {
   signWebhookPayload,
   buildSignedPayload,
   deliverWebhook,
-  canonicalizeWebhookBody,
-  webhookSignedInput,
-  WEBHOOK_TIMESTAMP_HEADER,
-  WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS,
-  type WebhookPayload,
+  BLOCKED_WEBHOOK_TARGET_ERROR,
 } from "@/lib/webhook-deliver";
 import {
   resetMetricsForTest,
@@ -160,6 +160,10 @@ describe("deliverWebhook", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     resetMetricsForTest();
+    // Default: the delivery-time guard accepts the target. Reset the hoisted
+    // mock explicitly so call counts don't leak between tests.
+    isSafeWebhookUrlAtDeliveryMock.mockReset();
+    isSafeWebhookUrlAtDeliveryMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -207,14 +211,35 @@ describe("deliverWebhook", () => {
     expect(ok.errorMessage).toBe("HTTP 302");
   });
 
-  it("returns false when the destination fails the delivery-time guard", async () => {
+  it("returns a clear error when the destination fails the delivery-time guard", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
+    isSafeWebhookUrlAtDeliveryMock.mockResolvedValue(false);
     // Loopback URL is blocked by the guard before any fetch happens.
     const ok = await deliverWebhook("http://127.0.0.1:8080/hook", SECRET, samplePayload, 2);
     expect(ok.success).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(ok.errorMessage).toBe("URL resolved to a private/internal address");
+    expect(ok.attempts).toBe(0);
+    expect(ok.errorMessage).toBe(BLOCKED_WEBHOOK_TARGET_ERROR);
+  });
+
+  it("re-validates before every attempt and blocks a rebinding host mid-retry", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    // First attempt resolves publicly, the retry resolves privately — the
+    // second attempt must be refused before its fetch (the 1s retry backoff
+    // is the only real delay in the test).
+    isSafeWebhookUrlAtDeliveryMock
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const ok = await deliverWebhook("https://rebind.example.com/hook", SECRET, samplePayload, 2);
+    expect(ok.success).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(ok.attempts).toBe(1);
+    expect(ok.errorMessage).toBe(BLOCKED_WEBHOOK_TARGET_ERROR);
+    expect(isSafeWebhookUrlAtDeliveryMock).toHaveBeenCalledTimes(2);
   });
 
   it("counts each retry attempt and labels the final failed outcome by the last attempt", async () => {
