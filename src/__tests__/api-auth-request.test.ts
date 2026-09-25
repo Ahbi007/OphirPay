@@ -28,11 +28,19 @@ import {
   authenticateRequest,
   requireAuth,
   withApiAuth,
-  hashApiKey,
+  apiKeyLookupHashes,
   deriveKeyPrefix,
 } from "@/lib/api-auth";
 
-function requestWithKey(key = "oph_livekeyvalue"): Request {
+/**
+ * A key in the current format (issue #701): `oph_` + 64 lowercase hex chars.
+ * The lookup now hashes with the versioned scheme and rejects malformed
+ * material before touching the database, so a legacy-shaped literal here would
+ * return null early and mask the lookup behaviour under test.
+ */
+const RAW_KEY = `oph_${"a".repeat(64)}`;
+
+function requestWithKey(key = RAW_KEY): Request {
   return new Request("http://localhost/api/payments", {
     headers: { authorization: `Bearer ${key}` },
   });
@@ -62,10 +70,10 @@ describe("authenticateRequest", () => {
     expect(mocks.findFirst).not.toHaveBeenCalled();
   });
 
-  it("looks the key up by hash + prefix and returns the auth result", async () => {
+  it("looks the key up by prefix and both accepted digests", async () => {
     mocks.findFirst.mockResolvedValue(storedKey());
 
-    const result = await authenticateRequest(requestWithKey("oph_livekeyvalue"));
+    const result = await authenticateRequest(requestWithKey(RAW_KEY));
 
     expect(result).toEqual({
       userId: "user_1",
@@ -74,10 +82,12 @@ describe("authenticateRequest", () => {
       scopes: ["read:payments"],
     });
 
+    // Newest digest format first, then the legacy bare-SHA-256 digest, so
+    // pre-#701 keys keep authenticating alongside v1-tagged ones.
     expect(mocks.findFirst).toHaveBeenCalledWith({
       where: {
-        keyHash: hashApiKey("oph_livekeyvalue"),
-        prefix: deriveKeyPrefix("oph_livekeyvalue"),
+        keyHash: { in: apiKeyLookupHashes(RAW_KEY) },
+        prefix: deriveKeyPrefix(RAW_KEY),
       },
       select: { id: true, userId: true, name: true, expiresAt: true, scopes: true },
     });
@@ -85,6 +95,11 @@ describe("authenticateRequest", () => {
     // lastUsed / request log are fire-and-forget writes.
     expect(mocks.update).toHaveBeenCalled();
     expect(mocks.logCreate).toHaveBeenCalledWith({ data: { keyId: "key_1" } });
+  });
+
+  it("rejects malformed key material before touching the database", async () => {
+    expect(await authenticateRequest(requestWithKey("oph_livekeyvalue"))).toBeNull();
+    expect(mocks.findFirst).not.toHaveBeenCalled();
   });
 
   it("defaults a null scopes column to an empty array", async () => {
