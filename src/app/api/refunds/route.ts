@@ -12,6 +12,7 @@ import { getAuthContext } from "@/lib/auth-session";
 import { verifyCsrf } from "@/lib/csrf";
 import { validateBody, createRefundRecordSchema } from "@/lib/validation-schemas";
 import { withRequestLogging } from "@/lib/request-logging";
+import { invalidateCache } from "@/lib/api-cache";
 
 export const GET = withMetrics("GET /api/refunds", withRequestLogging(async function GET(request: Request) {
   try {
@@ -64,9 +65,9 @@ export const GET = withMetrics("GET /api/refunds", withRequestLogging(async func
 // ── POST /api/refunds ─────────────────────────────────────────
 
 /**
- * Persist a refund ledger row AFTER the on-chain request_refund succeeded.
- * The on-chain id (captured from the tx return value) is stored so the UI can
- * later target approve_refund / process_refund at the correct contract record.
+ * Persist a refund ledger row AFTER a successful on-chain request_refund.
+ * The on-chain id (captured from the tx return value) is stored so the
+ * Approve → Process flow can target the correct contract record.
  */
 export const POST = withMetrics("POST /api/refunds", withRequestLogging(async function POST(request: Request) {
   try {
@@ -83,9 +84,8 @@ export const POST = withMetrics("POST /api/refunds", withRequestLogging(async fu
     const paymentId = String(data.paymentId);
 
     // Idempotency guard (issue #365): at most one refund per payment.
-    // The unique index (userId, paymentId) is the authoritative backstop —
-    // this pre-check only turns the common duplicate-submission case into a
-    // clear 409 instead of a Prisma error.
+    // The pre-check turns the common duplicate-submission case into a clear
+    // 409 instead of a Prisma error.
     const existing = await prisma.refund.findFirst({
       where: { userId: auth.userId, paymentId },
       select: { id: true, status: true },
@@ -122,6 +122,10 @@ export const POST = withMetrics("POST /api/refunds", withRequestLogging(async fu
           },
         },
       });
+
+      // Audit writes land in the persisted trail that /api/audit-log serves
+      // (#741) — drop the cached audit pages/entries so the next read is fresh.
+      await invalidateCache("audit-log");
 
       return successResponse(refund, undefined, 201);
     } catch (err) {

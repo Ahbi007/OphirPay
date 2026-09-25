@@ -45,6 +45,7 @@ vi.mock("@/lib/fee-estimator", () => ({
 // Mock the CSV import
 vi.mock("@/lib/csv-import", () => ({
   parseRecipientsCsv: vi.fn(),
+  parseRecipientsCsvToRows: vi.fn(),
   downloadCsvTemplate: vi.fn(),
 }));
 

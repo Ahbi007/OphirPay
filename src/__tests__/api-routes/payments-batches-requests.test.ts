@@ -17,6 +17,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     batch: {
       findMany: vi.fn(),
+      findFirst: vi.fn(),
       findUnique: vi.fn(),
       count: vi.fn(),
       create: vi.fn(),
@@ -25,6 +26,12 @@ vi.mock("@/lib/prisma", () => ({
       findMany: vi.fn(),
       create: vi.fn(),
     },
+    auditLog: {
+      create: vi.fn(),
+    },
+    $transaction: vi.fn(async (cb: ((tx: unknown) => Promise<unknown>) | Promise<unknown>[]) =>
+      typeof cb === "function" ? cb(prisma) : Promise.all(cb)
+    ),
   },
 }));
 
@@ -44,12 +51,13 @@ vi.mock("@/lib/metrics-counters", () => ({
 vi.mock("@/lib/contracts", () => ({
   DEFAULT_CONTRACT_ID: "CDAVU2XJ7C2Y52GRJZKRG3HDI7AJ2K2FHAFH5FPDTSUQAV7XNBQNNVAN",
   CHAIN_READ_SOURCE: "GACNKEDGJYLLVQDXWYEEPB47Y3JEV5JNZ3RQANTJIVKKEOXX4NC4YWHU",
+  // Mirrors MAX_READER_ENTRIES in contracts/ophirpay/src/lib.rs (#742).
+  CONTRACT_READER_ENTRY_CAP: 100,
   simulateContractCall: vi.fn(),
 }));
 
 import prisma from "@/lib/prisma";
 import * as authSession from "@/lib/auth-session";
-import * as contracts from "@/lib/contracts";
 import * as webhookDispatcher from "@/lib/webhook-dispatcher";
 import { GET as getPayments, POST as postPayments } from "@/app/api/payments/route";
 import {
@@ -60,6 +68,33 @@ import {
 import { GET as getBatches, POST as postBatches } from "@/app/api/batches/route";
 import { GET as getBatchById } from "@/app/api/batches/[id]/route";
 import { GET as getRequests, POST as postRequests } from "@/app/api/requests/route";
+import { generateCsrfToken } from "@/lib/csrf";
+import { CONTRACT_READER_ENTRY_CAP } from "@/lib/contracts";
+import { invalidateCaches } from "@/lib/api-cache";
+
+// Keep the real cache behaviour, but observe the invalidation calls a mutation
+// makes (#741).
+vi.mock("@/lib/api-cache", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-cache")>();
+  return {
+    ...actual,
+    invalidateCache: vi.fn(actual.invalidateCache),
+    invalidateCaches: vi.fn(actual.invalidateCaches),
+  };
+});
+
+function csrfHeaders(): Record<string, string> {
+  const token = generateCsrfToken();
+  return { "x-csrf-token": token, cookie: `__Host-csrf=${token}` };
+}
+
+function mutatingRequest(url: string, method: string, body?: unknown): Request {
+  return new Request(url, {
+    method,
+    headers: { "Content-Type": "application/json", ...csrfHeaders() },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+}
 
 const MOCK_AUTH = {
   userId: "user_123",
@@ -103,10 +138,7 @@ describe("API Routes: Payments, Batches & Requests", () => {
     it("POST returns 401 when unauthenticated", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(null);
       const res = await postPayments(
-        new Request("http://localhost/api/payments", {
-          method: "POST",
-          body: JSON.stringify({ amount: "10" }),
-        })
+        mutatingRequest("http://localhost/api/payments", "POST", { amount: "10" })
       );
       expect(res.status).toBe(401);
     });
@@ -114,10 +146,7 @@ describe("API Routes: Payments, Batches & Requests", () => {
     it("POST returns 400 when validation fails", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
       const res = await postPayments(
-        new Request("http://localhost/api/payments", {
-          method: "POST",
-          body: JSON.stringify({ amount: "invalid-amount" }),
-        })
+        mutatingRequest("http://localhost/api/payments", "POST", { amount: "invalid-amount" })
       );
       expect(res.status).toBe(400);
     });
@@ -135,18 +164,24 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(prisma.payment.create).mockResolvedValueOnce(mockCreated as never);
 
       const res = await postPayments(
-        new Request("http://localhost/api/payments", {
-          method: "POST",
-          body: JSON.stringify({
-            amount: 25.5,
-            sourceAccountId: "source_acc_1",
-            destAddress: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
-            assetCode: "XLM",
-            description: "Service fee",
-          }),
+        mutatingRequest("http://localhost/api/payments", "POST", {
+          amount: 25.5,
+          sourceAccountId: "source_acc_1",
+          destAddress: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+          assetCode: "XLM",
+          description: "Service fee",
         })
       );
       expect(res.status).toBe(201);
+
+      // Payment creation invalidates the read caches it changes (#741):
+      // aggregate stats, this user's analytics, and the audit ledger.
+      expect(vi.mocked(invalidateCaches)).toHaveBeenCalledWith([
+        { scope: "stats" },
+        { scope: "analytics", subject: MOCK_AUTH.userId },
+        { scope: "audit-log" },
+      ]);
+
       const data = await res.json();
       expect(data.data.id).toBe("p_new_1");
       expect(webhookDispatcher.dispatchWebhookEventAsync).toHaveBeenCalled();
@@ -156,8 +191,8 @@ describe("API Routes: Payments, Batches & Requests", () => {
   describe("/api/payments/[id]", () => {
     it("GET returns 401 when unauthenticated", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(null);
-      const res = await getPaymentById(new Request("http://localhost/api/payments/p1"), {
-        params: Promise.resolve({ id: "p1" }),
+      const res = await getPaymentById(new Request("http://localhost/api/payments/cabcdefghijklmnopqrstuvwx"), {
+        params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwx" }),
       });
       expect(res.status).toBe(401);
     });
@@ -166,30 +201,30 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
       vi.mocked(prisma.payment.findFirst).mockResolvedValueOnce(null);
 
-      const res = await getPaymentById(new Request("http://localhost/api/payments/p1"), {
-        params: Promise.resolve({ id: "p1" }),
+      const res = await getPaymentById(new Request("http://localhost/api/payments/cabcdefghijklmnopqrstuvwx"), {
+        params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwx" }),
       });
       expect(res.status).toBe(404);
     });
 
     it("GET returns payment detail for owner", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
-      const mockPayment = { id: "p1", amount: 100, status: "CONFIRMED" };
+      const mockPayment = { id: "cabcdefghijklmnopqrstuvwx", amount: 100, status: "CONFIRMED" };
       vi.mocked(prisma.payment.findFirst).mockResolvedValueOnce(mockPayment as never);
 
-      const res = await getPaymentById(new Request("http://localhost/api/payments/p1"), {
-        params: Promise.resolve({ id: "p1" }),
+      const res = await getPaymentById(new Request("http://localhost/api/payments/cabcdefghijklmnopqrstuvwx"), {
+        params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwx" }),
       });
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.data.id).toBe("p1");
+      expect(data.data.id).toBe("cabcdefghijklmnopqrstuvwx");
     });
 
     it("PATCH updates payment status and triggers webhooks", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
       vi.mocked(prisma.payment.updateMany).mockResolvedValueOnce({ count: 1 });
       const updatedPayment = {
-        id: "p1",
+        id: "cabcdefghijklmnopqrstuvwx",
         status: "COMPLETED",
         amount: 50,
         assetCode: "XLM",
@@ -198,11 +233,8 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(prisma.payment.findUnique).mockResolvedValueOnce(updatedPayment as never);
 
       const res = await patchPaymentById(
-        new Request("http://localhost/api/payments/p1", {
-          method: "PATCH",
-          body: JSON.stringify({ status: "COMPLETED", memo: "settled" }),
-        }),
-        { params: Promise.resolve({ id: "p1" }) }
+        mutatingRequest("http://localhost/api/payments/cabcdefghijklmnopqrstuvwx", "PATCH", { status: "COMPLETED", memo: "settled" }),
+        { params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwx" }) }
       );
       expect(res.status).toBe(200);
       expect(webhookDispatcher.dispatchWebhookEventAsync).toHaveBeenCalled();
@@ -213,11 +245,8 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(prisma.payment.updateMany).mockResolvedValueOnce({ count: 0 });
 
       const res = await patchPaymentById(
-        new Request("http://localhost/api/payments/p_none", {
-          method: "PATCH",
-          body: JSON.stringify({ status: "SIGNED" }),
-        }),
-        { params: Promise.resolve({ id: "p_none" }) }
+        mutatingRequest("http://localhost/api/payments/cabcdefghijklmnopqrstuvwz", "PATCH", { status: "SIGNED" }),
+        { params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwz" }) }
       );
       expect(res.status).toBe(404);
     });
@@ -227,9 +256,9 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(prisma.payment.updateMany).mockResolvedValueOnce({ count: 1 });
 
       const res = await deletePaymentById(
-        new Request("http://localhost/api/payments/p1", { method: "DELETE" }),
+        mutatingRequest("http://localhost/api/payments/cabcdefghijklmnopqrstuvwx", "DELETE"),
         {
-          params: Promise.resolve({ id: "p1" }),
+          params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwx" }),
         }
       );
       expect(res.status).toBe(200);
@@ -242,9 +271,9 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(prisma.payment.updateMany).mockResolvedValueOnce({ count: 0 });
 
       const res = await deletePaymentById(
-        new Request("http://localhost/api/payments/p1", { method: "DELETE" }),
+        mutatingRequest("http://localhost/api/payments/cabcdefghijklmnopqrstuvwx", "DELETE"),
         {
-          params: Promise.resolve({ id: "p1" }),
+          params: Promise.resolve({ id: "cabcdefghijklmnopqrstuvwx" }),
         }
       );
       expect(res.status).toBe(404);
@@ -264,15 +293,48 @@ describe("API Routes: Payments, Batches & Requests", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.data).toHaveLength(1);
+      // Child payments stay below the shared reader cap → not truncated (#742).
+      expect(data.data[0].paymentsTruncated).toBe(false);
+      expect(data.meta.truncated).toBe(false);
+    });
+
+    it("GET caps each batch's payments and surfaces the flag (#742)", async () => {
+      vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
+      // The route fetches cap + 1 child payments to detect an over-cap batch.
+      const overflow = CONTRACT_READER_ENTRY_CAP + 1;
+      const mockBatches = [
+        {
+          id: "b1",
+          name: "Legacy payroll",
+          payments: Array.from({ length: overflow }, (_, i) => ({ id: `p${i}` })),
+        },
+      ];
+      vi.mocked(prisma.batch.findMany).mockResolvedValueOnce(mockBatches as never);
+      vi.mocked(prisma.batch.count).mockResolvedValueOnce(1);
+
+      const res = await getBatches(new Request("http://localhost/api/batches?page=1&limit=5"));
+      expect(res.status).toBe(200);
+      const data = await res.json();
+
+      // The payload is capped at the same ceiling the on-chain reader uses and
+      // says so, instead of returning a partial list silently.
+      expect(data.data[0].payments).toHaveLength(CONTRACT_READER_ENTRY_CAP);
+      expect(data.data[0].paymentsTruncated).toBe(true);
+      expect(data.data[0].paymentsLimit).toBe(CONTRACT_READER_ENTRY_CAP);
+      expect(data.meta.truncated).toBe(true);
+      expect(vi.mocked(prisma.batch.findMany)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({
+            payments: expect.objectContaining({ take: CONTRACT_READER_ENTRY_CAP + 1 }),
+          }),
+        })
+      );
     });
 
     it("POST returns 400 when batch payload is invalid", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
       const res = await postBatches(
-        new Request("http://localhost/api/batches", {
-          method: "POST",
-          body: JSON.stringify({ name: "", recipients: [] }),
-        })
+        mutatingRequest("http://localhost/api/batches", "POST", { name: "", recipients: [] })
       );
       expect(res.status).toBe(400);
     });
@@ -288,16 +350,13 @@ describe("API Routes: Payments, Batches & Requests", () => {
       } as never);
 
       const res = await postBatches(
-        new Request("http://localhost/api/batches", {
-          method: "POST",
-          body: JSON.stringify({
-            name: "Payroll Jan",
-            sourceAccountId: "source_batch_1",
-            recipients: [
-              { amount: 100, address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" },
-              { amount: 200, address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" },
-            ],
-          }),
+        mutatingRequest("http://localhost/api/batches", "POST", {
+          name: "Payroll Jan",
+          sourceAccountId: "source_batch_1",
+          recipients: [
+            { amount: 100, address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" },
+            { amount: 200, address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" },
+          ],
         })
       );
       expect(res.status).toBe(201);
@@ -307,46 +366,56 @@ describe("API Routes: Payments, Batches & Requests", () => {
   });
 
   describe("GET /api/batches/[id]", () => {
-    it("returns 404 when ID is not a valid number", async () => {
+    it("returns 404 when the batch is not found", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
-      const res = await getBatchById(new Request("http://localhost/api/batches/not-a-number"), {
-        params: Promise.resolve({ id: "not-a-number" }),
+      vi.mocked(prisma.batch.findFirst).mockResolvedValueOnce(null);
+      const res = await getBatchById(new Request("http://localhost/api/batches/missing"), {
+        params: Promise.resolve({ id: "missing" }),
       });
       expect(res.status).toBe(404);
     });
 
-    it("returns 404 when contract simulation fails", async () => {
+    it("returns batch details with per-item status when found", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
-      vi.mocked(contracts.simulateContractCall).mockResolvedValueOnce({
-        status: "SIMULATION_FAILED",
-        error: "Not found",
+      vi.mocked(prisma.batch.findFirst).mockResolvedValueOnce({
+        id: "batch_123",
+        userId: "user_123",
+        name: "Payroll Jan",
+        description: null,
+        status: "PARTIALLY_COMPLETED",
+        createdAt: new Date("2026-08-01T00:00:00Z"),
+        updatedAt: new Date("2026-08-01T00:00:00Z"),
+        payments: [
+          {
+            id: "pay_1",
+            amount: 100,
+            assetCode: "XLM",
+            memo: "aug-1",
+            status: "COMPLETED",
+            errorMessage: null,
+          },
+          {
+            id: "pay_2",
+            amount: 200,
+            assetCode: "XLM",
+            memo: null,
+            status: "FAILED",
+            errorMessage: "insufficient funds",
+          },
+        ],
       } as never);
 
-      const res = await getBatchById(new Request("http://localhost/api/batches/10"), {
-        params: Promise.resolve({ id: "10" }),
-      });
-      expect(res.status).toBe(404);
-    });
-
-    it("returns batch details and includes payments when ?payments=true", async () => {
-      vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
-      vi.mocked(contracts.simulateContractCall)
-        .mockResolvedValueOnce({
-          status: "SUCCESS",
-          returnValue: { id: 10, name: "OnChain Batch", status: 1 },
-        } as never)
-        .mockResolvedValueOnce({
-          status: "SUCCESS",
-          returnValue: [1, 2, 3],
-        } as never);
-
-      const res = await getBatchById(new Request("http://localhost/api/batches/10?payments=true"), {
-        params: Promise.resolve({ id: "10" }),
+      const res = await getBatchById(new Request("http://localhost/api/batches/batch_123"), {
+        params: Promise.resolve({ id: "batch_123" }),
       });
       expect(res.status).toBe(200);
       const data = await res.json();
-      expect(data.data.id).toBe(10);
-      expect(data.data.payments).toEqual([1, 2, 3]);
+      expect(data.data.id).toBe("batch_123");
+      expect(data.data.items).toHaveLength(2);
+      expect(data.data.items[0].status).toBe("sent");
+      expect(data.data.items[1].status).toBe("failed");
+      expect(data.data.items[1].errorMessage).toBe("insufficient funds");
+      expect(data.data.progress).toMatchObject({ total: 2, sent: 1, failed: 1, pending: 0 });
     });
   });
 
@@ -365,10 +434,7 @@ describe("API Routes: Payments, Batches & Requests", () => {
     it("POST returns 400 when validation fails", async () => {
       vi.mocked(authSession.getAuthContext).mockResolvedValueOnce(MOCK_AUTH);
       const res = await postRequests(
-        new Request("http://localhost/api/requests", {
-          method: "POST",
-          body: JSON.stringify({ amount: -10 }),
-        })
+        mutatingRequest("http://localhost/api/requests", "POST", { amount: -10 })
       );
       expect(res.status).toBe(400);
     });
@@ -386,14 +452,11 @@ describe("API Routes: Payments, Batches & Requests", () => {
       vi.mocked(prisma.paymentRequest.create).mockResolvedValueOnce(mockCreated as never);
 
       const res = await postRequests(
-        new Request("http://localhost/api/requests", {
-          method: "POST",
-          body: JSON.stringify({
-            amount: 100,
-            assetCode: "XLM",
-            description: "Invoice #101",
-            recipientAddress: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
-          }),
+        mutatingRequest("http://localhost/api/requests", "POST", {
+          amount: 100,
+          assetCode: "XLM",
+          description: "Invoice #101",
+          recipientAddress: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
         })
       );
       expect(res.status).toBe(201);

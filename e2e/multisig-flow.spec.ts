@@ -38,14 +38,14 @@ async function switchSigner(page: Page, address: string): Promise<void> {
     }).__setFreighterAddress(a);
   }, address);
 
-  await page.getByRole("button", { name: "Disconnect wallet" }).click();
-  await page.getByRole("button", { name: "Connect Wallet" }).click();
+  await page.getByRole("button", { name: "Disconnect wallet", exact: true }).click();
+  await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
   // Freighter is "Installed" because we injected window.freighter.
   await page.getByRole("button", { name: /Freighter/i }).click();
 
   // Wait until the wallet is connected again (Connect button disappears).
   await expect(
-    page.getByRole("button", { name: "Connect Wallet" }),
+    page.getByRole("button", { name: "Connect Wallet", exact: true }),
   ).toHaveCount(0, { timeout: 15000 });
 }
 
@@ -64,7 +64,7 @@ test.describe("Two-signer multisig payment flow", () => {
 
     // Wallet auto-connects as SIGNER_A via the mocked Freighter.
     await expect(
-      page.getByRole("button", { name: "Connect Wallet" }),
+      page.getByRole("button", { name: "Connect Wallet", exact: true }),
     ).toHaveCount(0, { timeout: 15000 });
     await expect(page.locator("main h1")).toContainText("Multisig", {
       timeout: 15000,

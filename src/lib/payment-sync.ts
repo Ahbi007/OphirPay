@@ -125,6 +125,9 @@ export async function runPaymentStatusSync(
   });
 
   const counters = { confirmed: 0, failed: 0, notFound: 0, errors: 0 };
+  // Payments scanned during this run — initialized to 0 so the error path
+  // below can report accurately even when the query itself fails.
+  let scanned = 0;
 
   try {
     // Only SUBMITTED payments that carry a tx hash — submissions that still
@@ -145,6 +148,7 @@ export async function runPaymentStatusSync(
         transactionHash: true,
       },
     });
+    scanned = pending.length;
 
     logger.info("payment-sync: started", {
       trigger,
@@ -251,7 +255,7 @@ export async function runPaymentStatusSync(
       id: run.id,
       trigger,
       status: "error",
-      scanned: pendingCount,
+      scanned,
       confirmed: counters.confirmed,
       failed: counters.failed,
       notFound: counters.notFound,

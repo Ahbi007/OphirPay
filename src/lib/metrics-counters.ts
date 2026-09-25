@@ -18,6 +18,8 @@ const counters = {
   webhooks_failed_total: 0,
   db_query_duration_seconds_sum: 0,
   db_query_duration_seconds_count: 0,
+  /** Gauge: currently open SSE event-stream connections (inc on connect, dec on disconnect). */
+  sse_open_connections: 0,
 };
 
 export type MetricName = keyof typeof counters;

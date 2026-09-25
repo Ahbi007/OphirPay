@@ -2,6 +2,16 @@
 
 All notable changes to OphirPay will be documented in this file.
 
+## [Unreleased] — 2026-09-25
+
+### Security
+- **Distributed rate limiting became real (#703)**: `REDIS_URL` previously had no effect on the global limiter because `src/proxy.ts` constructed its own in-memory store on the Edge runtime. The rate-limit store now selects its transport from the URL scheme — `https://` (Upstash-compatible REST) is shared by every replica on both runtimes, while `redis://` uses ioredis on Node — and the README, `.env.example` and `docker-compose.yml` describe the enforcement point and its per-instance limitation. Two replicas now share one bucket when a REST Redis endpoint is configured.
+- **CSRF registry drift guard (#704)**: `src/__tests__/csrf-coverage.test.ts` now globs every `src/app/api/**/route.ts`, extracts each exported mutating handler by method, and fails with the exact registry entry to add when one is neither registered nor allowlisted. The scheduler endpoints are allowlisted with reasons, and `docs/CSRF-AUDIT.md` was regenerated to match the registry (37 protected + 3 allowlisted).
+
+### Changed
+- **Coverage now measures the security surface (#700)**: `src/lib/api-auth.ts`, `rate-limit.ts`, `webhook-dispatcher.ts` and `webhook-deliver.ts` are no longer excluded from the coverage report; new suites cover the API-key lookup, the Redis REST store and webhook dispatch. The README coverage figure was regenerated (68.9% overall).
+- **JavaScript bundle-size budget (#739)**: added `bundle-budget.json` with committed per-route first-load budgets, `npm run bundle:check` (runs in CI after every production build and appends a per-route table to the job summary) and an opt-in `npm run analyze` treemap. `HOOK_PAGE_LIMIT` moved to `src/lib/hooks-pagination.ts` so the hooks route module exports only HTTP handlers (required by the webpack build the analyzer uses).
+
 ## [Unreleased] — 2026-08-26
 
 ### Added
@@ -9,7 +19,11 @@ All notable changes to OphirPay will be documented in this file.
 
 ## [Unreleased] — 2026-08-12 (submission hardening pass)
 
+### Added
+- **Keyboard navigation for the payments table**: rows use a roving tabindex (the active row is the only one in the tab order) and ArrowUp/ArrowDown/Home/End move between rows — from the row itself or from its action buttons. The active row gets a theme-matched highlight, headers declare `scope="col"`, and an axe scan + keyboard-flow tests (unit and Playwright) cover the table
+
 ### Fixed
+- **Stale wallet balance after disconnect**: `MultiWalletProvider`/`WalletProvider` now reset wallet state synchronously on disconnect (before async wallet/session cleanup) and ignore balance fetches that resolve after a disconnect, so the dashboard and header render the connect placeholder instead of a stale cached balance
 - **Governance list renders real proposals**: `GET /api/governance/proposals` now enumerates proposals on-chain (count + by-id, capped at 100, each read cached 30s) and returns an array; the page previously received a bare count number and always showed the empty state
 - **Governance create flow works end-to-end**: the modal now accepts a deposit amount (XLM → stroops) and optional asset; empty asset resolves to native XLM's SAC address instead of the proposer address (which was never a token contract)
 - **Empty-caller tx bugs**: `processRefund` and `executeGovernanceProposal` signed with an empty source account, which can never simulate or submit; both now require the caller's public key

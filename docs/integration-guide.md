@@ -47,6 +47,16 @@ stellar contract invoke \
 
 ## Integration Patterns
 
+## API Key Usage
+
+The dashboard's **API Keys** view shows request totals for each key and its last-used time. The same data is available to an authenticated browser session through:
+
+```http
+GET /api/keys/stats?window=30d
+```
+
+`window` accepts `24h`, `7d`, or `30d` and defaults to `30d`. The response contains `keys`, where each item includes the key metadata, `total` (all recorded requests), and `window` (requests in the selected period). Only keys owned by the authenticated user are returned.
+
 ### Pattern 1: Record a Payment
 
 ```typescript
@@ -110,6 +120,7 @@ Your endpoint receives HMAC-SHA256 signed payloads:
 POST /hooks HTTP/1.1
 Content-Type: application/json
 X-OphirPay-Signature: <hmac-sha256 hex>
+X-OphirPay-Timestamp: 2026-08-06T12:00:00Z
 X-OphirPay-Event: payment_recorded
 
 {
@@ -120,31 +131,46 @@ X-OphirPay-Event: payment_recorded
 }
 ```
 
-The signature is HMAC-SHA256 (hex) over the payload **without** the
-`signature` field, using the secret returned when you registered the
-webhook. The same value is mirrored in the `X-OphirPay-Signature` header for
-convenience. Verify by recomputing:
+The signature is HMAC-SHA256 (hex) over
+`<X-OphirPay-Timestamp>.<payload with the signature field emptied>` — the
+`signature` field is set to `""` (the key is kept) and re-serialized with
+stable key order, using the secret returned when you registered the webhook.
+Binding the timestamp into the signed input is what makes the
+`X-OphirPay-Timestamp` header trustworthy for replay protection. The same
+signature is mirrored in the `X-OphirPay-Signature` header for convenience.
+Verify by recomputing over the exact canonical form:
 
 ```typescript
 import { createHmac, timingSafeEqual } from "crypto";
 
 const received = await request.json();
-const { signature, ...payload } = received; // strip signature before signing
+// Canonicalize: empty the signature field (keep the key, set it to "") and
+// re-serialize with the received key order — matches buildSignedPayload.
+const canonical = JSON.stringify({ ...received, signature: "" });
+// The timestamp is part of the signed input.
+const timestamp = request.headers.get("x-ophirpay-timestamp") ?? received.timestamp ?? "";
 const expected = createHmac("sha256", yourSecret)
-  .update(JSON.stringify(payload))
+  .update(`${timestamp}.${canonical}`)
   .digest("hex");
-const ok = signature.length === expected.length &&
-  timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+const provided = request.headers.get("x-ophirpay-signature") ?? "";
+const ok = provided.length === expected.length &&
+  timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
 ```
 
-Always compare with a constant-time comparison (`timingSafeEqual`) and
+Always compare with a constant-time comparison (`timingSafeEqual`), verify
+against the **header** value, enforce the timestamp freshness window, and
 reject requests missing a valid signature.
-feat/webhook-test-event
-> **Tip — verify without a real payment.** You don't need a live payment to
-> test your endpoint. In the dashboard, open a webhook and click **Send test
-> event**. OphirPay fires a sample `payment.completed` payload (with a valid
-> HMAC signature) that is clearly marked `"test": true` on both the envelope
-> and the `data` object. No real payment or database record is created.
+See [Webhook Signature Verification](webhook-verification.md) for the exact
+canonical form, replay protection, and runnable Node/Python reference
+implementations.
+
+### Rotating your webhook secret
+
+Secrets can be rotated from the Webhooks page (or via `PATCH /api/webhooks?id=...`).
+Rotating revokes the previous secret **immediately** — the next delivery is
+signed with the new secret, so any receiver still verifying with the old value
+will reject it. Before rotating, make sure your endpoint's stored secret is easy
+to update, and save the new secret right away: it is shown only once.
 
 ### Webhook Event Types
 
@@ -163,8 +189,31 @@ Batches, recurrences, and payment requests emit their own events
 (`batch.*`, `recurrence.*`, `request.*`). Subscribe to any subset of these
 event types when registering a webhook.
 
-receive every event type
+### Replaying Missed Events
 
+If your endpoint was down during an outage, replay stored events from the
+last 7 days:
+
+```typescript
+const res = await fetch("/api/webhooks/<webhook-id>/replay", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: "Bearer <api-key>",
+    "x-csrf-token": "<csrf-token>",
+  },
+  body: JSON.stringify({
+    since: "2026-08-19T00:00:00Z", // optional, clamped to 7-day window
+    until: "2026-08-26T00:00:00Z", // optional, defaults to now
+    limit: 50,                     // optional, max 100
+  }),
+});
+const { data } = await res.json();
+// { replayBatchId, selected, succeeded, failed, window }
+```
+
+Each replay attempt is recorded as a delivery. View history at
+`GET /api/webhooks/<webhook-id>/deliveries` or in the Webhooks dashboard.
 
 ## Available Contract Functions
 
@@ -219,6 +268,47 @@ receive every event type
 | `accept_ownership` | Accept pending ownership |
 | `set_fee_config` | Configure platform fees per operation |
 
+## Rate Limiting
+
+API requests are rate limited per client IP to protect the service. When a
+client exceeds the limit, the API responds with HTTP `429 Too Many Requests`.
+
+### Response Shape
+
+The 429 response uses the standard error envelope:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Too many requests. Please try again later."
+  },
+  "timestamp": "2026-08-26T00:00:00.000Z"
+}
+```
+
+### Headers
+
+| Header | Description |
+|---|---|
+| `Retry-After` | Seconds (integer) until the current window resets. Clients should wait this long before retrying. |
+| `X-RateLimit-Limit` | Maximum requests allowed in the current window. |
+| `X-RateLimit-Remaining` | Requests remaining in the current window. |
+| `X-RateLimit-Reset` | Unix timestamp (seconds) when the window resets. |
+
+The limit is configurable via the `RATE_LIMIT_RPM` environment variable
+(default: 120 requests per minute per IP). Health (`/api/health`) and metrics
+(`/api/metrics`) endpoints are excluded from rate limiting. The metrics
+endpoint additionally requires `Authorization: Bearer $METRICS_TOKEN` — see
+[Per-Endpoint Metrics](./metrics-endpoints.md).
+
+### Backing Off
+
+Respect the `Retry-After` header: wait at least the indicated number of seconds
+before retrying. Repeatedly ignoring it will keep returning `429`. For bursty
+workloads, implement exponential backoff starting from the `Retry-After` value.
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -256,5 +346,6 @@ npx playwright test
 
 - [Open an issue](https://github.com/OphirPay/OphirPay/issues/new?template=bug_report.yml)
 - [Read the architecture guide](./architecture.md)
+- [Read the API endpoint conventions guide](./API_GUIDE.md) — the reference for adding or modifying API endpoints
 - [View the mainnet deployment guide](./deployment-mainnet.md)
 - [Check SUPPORT.md](../.github/SUPPORT.md)

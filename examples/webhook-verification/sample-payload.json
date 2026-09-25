@@ -1,0 +1,6 @@
+{
+  "event": "payment.created",
+  "timestamp": "2026-08-14T00:00:00Z",
+  "data": { "id": "p_123", "amount": 100 },
+  "signature": "83ab64c58dadec406835ebd9b907b579cb89132098823ec66f2b96dd1ad84258"
+}

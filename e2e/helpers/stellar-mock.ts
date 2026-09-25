@@ -37,7 +37,7 @@ import type { Page, Route } from "@playwright/test";
 // ── Fixed (known-valid) addresses ──────────────────────────────
 // SIGNER_B is the repo's CHAIN_READ_SOURCE; SIGNER_A is the repo's DEMO_WALLET.
 export const SIGNER_A =
-  "GBZX4364PEPQTDICMIQDZ56K4T75QGKCRFHSVJFVODVFBRR6XOQNFB2C";
+  "GBH3O5IHGJ6GUKZCINS3UZGHVKDKYDLVIRKZY7GYA27B54WT3Q7H4KXO";
 export const SIGNER_B =
   "GACNKEDGJYLLVQDXWYEEPB47Y3JEV5JNZ3RQANTJIVKKEOXX4NC4YWHU";
 
@@ -74,7 +74,11 @@ export function createState(overrides: Partial<MultisigState> = {}): MultisigSta
 const ed25519 = (publicKey: string): Buffer =>
   StrKey.decodeEd25519PublicKey(publicKey);
 
-/** base64 of the AccountEntry that backs the given signer's getAccount(). */
+/**
+ * base64 of the LedgerEntryData (account arm) that backs the given signer's
+ * getAccount(). The RPC parser wraps each entry's `xdr` as LedgerEntryData,
+ * so the payload must be the union (account arm), not a bare AccountEntry.
+ */
 export function accountLedgerEntryData(publicKey: string): string {
   const entry = new xdr.AccountEntry({
     accountId: xdr.PublicKey.publicKeyTypeEd25519(ed25519(publicKey)),
@@ -86,9 +90,13 @@ export function accountLedgerEntryData(publicKey: string): string {
     homeDomain: "",
     thresholds: Buffer.from([0, 0, 0, 0]),
     signers: [],
-    ext: (xdr.AccountEntryExt as unknown as Record<number, () => unknown>)[0]() as never,
+    // switch 0 = void ext (the union's runtime constructor takes the switch
+    // number; the shipped .d.ts only declares the static factories).
+    ext: new (xdr.AccountEntryExt as unknown as new (
+      switchOn: number
+    ) => xdr.AccountEntryExt)(0),
   });
-  return entry.toXDR("base64");
+  return xdr.LedgerEntryData.account(entry).toXDR("base64");
 }
 
 /** base64 of the matching AccountLedgerKey, keyed to the same signer. */
@@ -107,7 +115,9 @@ export function accountLedgerKey(publicKey: string): string {
  */
 export function emptySorobanTransactionData(): string {
   const data = new xdr.SorobanTransactionData({
-    ext: (xdr.ExtensionPoint as unknown as Record<number, () => unknown>)[0]() as never,
+    ext: new (xdr.ExtensionPoint as unknown as new (
+      switchOn: number
+    ) => xdr.ExtensionPoint)(0), // switch 0 = void
     resources: new xdr.SorobanResources({
       footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite: [] }),
       instructions: 0,
@@ -183,7 +193,11 @@ export const rpcHandler = (state: MultisigState) =>
           transactionData: emptySorobanTransactionData(),
           minResourceFee: "0",
           events: [],
-          results: [],
+          // One result per operation. assembleTransaction() reads
+          // simulation.result.auth for the operation's authorization entries —
+          // an empty array means "no auth required" (the SDK touches
+          // result?.auth when present, so the entry must exist).
+          results: [{ auth: [] }],
           cost: { cpuInsns: "100", memBytes: "0" },
         };
       }
@@ -239,6 +253,31 @@ export async function installMultisigMocks(
   page: Page,
   state: MultisigState,
 ): Promise<void> {
+  // Auth session: the fake freighter exposes no signMessage, so the real
+  // server-side session proof can never succeed and the wallet hook would
+  // roll the connection back. The multisig flow only needs wallet signing,
+  // not an API session, so accept the session outright (same as other
+  // wallet-only e2e helpers).
+  await page.route("**/api/auth/challenge**", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: { challenge: "mock-challenge", message: "mock message" },
+      }),
+    });
+  });
+  await page.route("**/api/auth/session**", async (route) => {
+    const method = route.request().method().toUpperCase();
+    await route.fulfill({
+      contentType: "application/json",
+      status: method === "DELETE" ? 200 : 200,
+      body: JSON.stringify({
+        success: true,
+        data: { authenticated: true },
+      }),
+    });
+  });
+
   // App read API: multisig config + pending approval requests.
   await page.route("**/api/multisig**", async (route) => {
     const url = route.request().url();
@@ -290,10 +329,10 @@ export function randomAddress(): string {
 
 /**
  * JavaScript to inject (via addInitScript) a fake `window.freighter` whose
- * address the test can flip with window.__setFreighterAddress(...). No
- * `signMessage` is exposed on purpose: that skips strict server-side session
- * proof (the fake signature could never verify), while the wallet still
- * connects — which is all the multisig page needs.
+ * address the test can flip with window.__setFreighterAddress(...). The
+ * auth endpoints are mocked too (see installMultisigMocks), so a dummy
+ * `signMessage` keeps the wallet hook's connect() from rolling back — the
+ * wallet stays connected, which is all the multisig page needs.
  */
 export function fakeFreighterInitScript(initialAddress: string): string {
   return `
@@ -314,6 +353,10 @@ export function fakeFreighterInitScript(initialAddress: string): string {
         // identity signer: pass the prepared envelope through unchanged; the
         // mocked RPC/Horizon already mark the tx successful.
         signTransaction: async (txXdr) => txXdr,
+        // The freighter connector always exposes signMessage, so the wallet
+        // hook will call it during connect(). The auth session route is
+        // mocked to accept any proof, so a dummy signature is sufficient.
+        signMessage: async () => "AAAA",
       };
     })();
   `;

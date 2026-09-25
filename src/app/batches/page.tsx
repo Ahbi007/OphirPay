@@ -13,7 +13,9 @@ import { EmptyState } from "@/components/EmptyState";
 import { LoadingSkeleton } from "@/components/LoadingSkeleton";
 import { Card } from "@/components/ui/Card";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import { useApiQuery } from "@/hooks/useApiQuery";
+import { useApiQuery, useApiMutation, type ApiError } from "@/hooks/useApiQuery";
+import { useToast } from "@/components/ui/Toast";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useQueryClient } from "@tanstack/react-query";
 import { connectLiveEvents } from "@/lib/events/event-client";
 import type { Batch, BatchStatus } from "@/types";
@@ -291,7 +293,12 @@ export default function BatchesPage() {
                       className="border-b border-gray-100 dark:border-gray-800/50 hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors"
                     >
                       <td className="py-3 px-4">
-                        <p className="font-medium text-gray-900 dark:text-white">{batch.name}</p>
+                        <Link
+                          href={`/batches/${batch.id}`}
+                          className="font-medium text-gray-900 dark:text-white hover:text-ophir-600 dark:hover:text-ophir-400 transition-colors"
+                        >
+                          {batch.name}
+                        </Link>
                         {batch.description && (
                           <p className="text-xs text-gray-400 mt-0.5">{batch.description}</p>
                         )}

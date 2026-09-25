@@ -1,84 +1,101 @@
 // SPDX-License-Identifier: MIT
 
 import { withApiAuth } from "@/lib/api-auth";
-import { successResponse, handleApiError, badRequestError } from "@/lib/api-response";
+import { successResponse, handleApiError, validationError } from "@/lib/api-response";
 import prisma from "@/lib/prisma";
-import { simulateContractCall, DEFAULT_CONTRACT_ID, CHAIN_READ_SOURCE } from "@/lib/contracts";
-import { z } from "zod";
 import { withRequestLogging } from "@/lib/request-logging";
 import {
   auditLogQuerySchema,
-  toAuditLogFilters,
-  iterateAuditLogEntries,
+  parseAuditTimestamp,
+  readAuditLogTotalCount,
+  readAuditEntryById,
   type AuditLogEntry,
 } from "@/lib/audit-log";
-
-const auditLogQuerySchema = z.object({
-  page: z.coerce.number().int().positive().optional().default(1),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
-  actor: z.string().optional(),
-  action: z.string().optional(),
-  since: z.coerce.number().int().positive().optional(),
-  source: z.enum(["contract", "db", "all"]).optional().default("contract"),
-});
-
-export type AuditLogEntry = {
-  id: number;
-  timestamp: number;
-  action: string;
-  actor: string;
-  target_id: number;
-  details: string;
-};
 
 /**
  * GET /api/audit-log
  *
- * Returns contract audit log entries. Requires API-key authentication with the
+ * Returns audit log entries. Requires API-key authentication with the
  * `admin` scope. Supports offset pagination (`page` / `limit`) and combined
- * filters: `actor`, `action`, `resource` (matches `target_id`), a `since` /
- * `until` date range (Unix seconds or ISO 8601), and `order` (asc | desc).
+ * filters: `actor` (substring, case-insensitive), `action` (exact), a
+ * `since` / `until` timestamp range (Unix seconds or ISO 8601), and `order`
+ * (asc | desc).
  *
- * Filtering is applied server-side across the full on-chain ledger, so the
- * `total` in `meta` reflects the filtered set, not the raw contract count.
+ * `source` selects the backing store:
+ *   - `db`       → persisted audit entries (refund lifecycle history, issue
+ *                  #365), queryable by action/target;
+ *   - `contract` → the on-chain immutable audit ledger (default), filtered
+ *                  server-side with offset pagination;
+ *   - `all`      → DB entries plus matching on-chain entries.
+ *
+ * For the on-chain sources, filtering is applied across the full ledger, so
+ * `meta.total` reflects the filtered set, not the raw contract count.
  */
+
+type DbAuditRow = {
+  id: string;
+  timestamp: number;
+  action: string;
+  actor: string;
+  target_id: string;
+  details: string | null;
+};
+
+function mapDbRow(e: {
+  id: string;
+  action: string;
+  actor: string | null;
+  target: string | null;
+  details: unknown;
+  createdAt: Date;
+}): DbAuditRow {
+  return {
+    id: e.id,
+    timestamp: new Date(e.createdAt).getTime(),
+    action: e.action,
+    actor: e.actor ?? "",
+    target_id: e.target ?? "",
+    details:
+      typeof e.details === "string"
+        ? e.details
+        : e.details != null
+          ? JSON.stringify(e.details)
+          : null,
+  };
+}
+
+/** Applies the combined filters with AND semantics to one on-chain entry. */
+function matchesFilters(
+  entry: AuditLogEntry,
+  filters: {
+    actor?: string;
+    action?: string;
+    resource?: number;
+    since?: number;
+    until?: number;
+  }
+): boolean {
+  if (filters.actor && !entry.actor.toLowerCase().includes(filters.actor)) {
+    return false;
+  }
+  if (filters.action && entry.action !== filters.action) return false;
+  if (filters.resource != null && entry.target_id !== filters.resource) {
+    return false;
+  }
+  if (filters.since != null && entry.timestamp < filters.since) return false;
+  if (filters.until != null && entry.timestamp > filters.until) return false;
+  return true;
+}
+
 async function _GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const raw = Object.fromEntries(searchParams.entries());
-    const parsed = auditLogQuerySchema.safeParse(raw);
-    if (!parsed.success) {
-      return badRequestError(
-        parsed.error.issues.map((e) => e.message).join("; ")
-      );
-    }
-
-    const { page, limit, source } = parsed.data;
-
-    // Persisted (DB) audit entries — refund lifecycle history with record
-    // ids, queryable by action/target (issue #365).
-    const dbEntries = source === "db" || source === "all"
-      ? await prisma.auditLog.findMany({
-          orderBy: { createdAt: "desc" },
-          skip: (page - 1) * limit,
-          take: limit,
-          ...(parsed.data.action ? { where: { action: parsed.data.action } } : {}),
-        })
-      : [];
-
-    if (source === "db") {
-      return successResponse(
-        dbEntries.map((e) => ({
-          id: e.id,
-          timestamp: new Date(e.createdAt).getTime(),
-          action: e.action,
-          actor: e.actor ?? "",
-          target_id: e.target ?? "",
-          details: e.details ?? null,
-        })),
-        { page, limit, total: 0 }
-      );
-    }
+    // Blank query params are treated as absent (Zod .optional() only applies
+    // to undefined).
+    const param = (name: string): string | undefined => {
+      const v = searchParams.get(name);
+      return v == null || v.trim() === "" ? undefined : v;
+    };
 
     const parsed = auditLogQuerySchema.safeParse({
       page: param("page"),
@@ -89,45 +106,116 @@ async function _GET(request: Request) {
       since: param("since"),
       until: param("until"),
       order: param("order"),
+      source: param("source"),
     });
     if (!parsed.success) return validationError(parsed.error);
 
-    if (countResult.status === "SIMULATION_FAILED") {
-      return successResponse(dbEntries, {
-        page,
-        limit,
-        total: 0,
+    const { page, limit, source } = parsed.data;
+    const hasFilters = Boolean(
+      parsed.data.actor ||
+        parsed.data.action ||
+        parsed.data.resource != null ||
+        parsed.data.since != null ||
+        parsed.data.until != null
+    );
 
-      });
+    // Filters shared by the contract path (numeric seconds) and the DB path
+    // (exact action / target-id match on the persisted trail).
+    const filters = {
+      actor: parsed.data.actor?.toLowerCase(),
+      action: parsed.data.action,
+      resource: parsed.data.resource,
+      since:
+        parsed.data.since != null
+          ? (parseAuditTimestamp(parsed.data.since) ?? undefined)
+          : undefined,
+      until:
+        parsed.data.until != null
+          ? (parseAuditTimestamp(parsed.data.until) ?? undefined)
+          : undefined,
+    };
+    const dbWhere = {
+      ...(filters.action ? { action: filters.action } : {}),
+      ...(filters.actor ? { actor: { contains: parsed.data.actor } } : {}),
+      ...(filters.resource != null
+        ? { target: String(filters.resource) }
+        : {}),
+    };
+
+    // Persisted (DB) audit entries — refund lifecycle history with record
+    // ids (issue #365).
+    const dbRows =
+      source === "db" || source === "all"
+        ? (
+            await prisma.auditLog.findMany({
+              where: dbWhere,
+              orderBy: { createdAt: "desc" },
+              skip: (page - 1) * limit,
+              take: limit,
+            })
+          ).map(mapDbRow)
+        : [];
+    const dbTotal =
+      source === "db" || source === "all"
+        ? await prisma.auditLog.count({ where: dbWhere })
+        : 0;
+
+    if (source === "db") {
+      return successResponse(dbRows, { page, limit, total: dbTotal });
     }
 
-    const totalCount = Number(countResult.returnValue ?? 0);
+    // ── On-chain ledger (source=contract | all) ────────────────
+    const totalCount = await readAuditLogTotalCount();
     if (totalCount === 0) {
-      return successResponse(dbEntries, { page, limit, total: 0 });
+      return successResponse(dbRows, { page, limit, total: dbTotal });
     }
 
-    // Fetch entries from the contract (most recent first, capped at limit)
+    // Which ids to read (ids are 1-indexed, newest = highest id):
+    // - Unfiltered: only the page window, so plain reads stay cheap.
+    // - Filtered: scan the whole ledger so the filtered `total` (and therefore
+    //   pagination) is exact regardless of where matches fall.
+    const descending = parsed.data.order !== "asc";
+    const ascendingIds = (count: number) => {
+      const ids: number[] = [];
+      for (let id = 1; id <= count; id++) ids.push(id);
+      return ids;
+    };
+    const windowIds = (count: number) => {
+      const ids: number[] = [];
+      const startId = Math.max(1, count - (page - 1) * limit);
+      const endId = Math.max(1, startId - limit + 1);
+      for (let id = startId; id >= endId; id--) ids.push(id);
+      return ids;
+    };
+
+    const idPool = hasFilters ? ascendingIds(totalCount) : windowIds(totalCount);
+    if (!descending) idPool.reverse();
+
     const entries: AuditLogEntry[] = [];
-    const startId = Math.max(1, totalCount - (page - 1) * limit);
-    const endId = Math.max(1, startId - limit + 1);
-
-    // Collect the filtered set (bounded by the on-chain ledger) to compute the
-    // total for offset pagination.
-    const all: AuditLogEntry[] = [];
-    for await (const entry of iterateAuditLogEntries(filters)) {
-      all.push(entry);
+    for (let i = 0; i < idPool.length; i += 10) {
+      const chunk = idPool.slice(i, i + 10);
+      const results = await Promise.all(chunk.map((id) => readAuditEntryById(id)));
+      for (const entry of results) {
+        if (entry && (!hasFilters || matchesFilters(entry, filters))) {
+          entries.push(entry);
+        }
+      }
     }
-    const total = all.length;
-    const start = (page - 1) * limit;
-    const items = all.slice(start, start + limit);
-    const hasMore = start + limit < total;
 
-    return successResponse(entries, {
-      page,
-      limit,
-      total: totalCount,
-      
-    });
+    if (!hasFilters) {
+      // Unfiltered page window — total is the ledger size.
+      return successResponse(entries, { page, limit, total: totalCount });
+    }
+
+    // Filtered — slice the page from the matching set (kept in id order).
+    const start = (page - 1) * limit;
+    const pageItems = entries.slice(start, start + limit);
+    const total = entries.length + (source === "all" ? dbTotal : 0);
+    const data =
+      source === "all"
+        ? [...pageItems, ...dbRows]
+        : pageItems;
+    return successResponse(data, { page, limit, total });
   } catch (error) {
     return handleApiError(error);
   }

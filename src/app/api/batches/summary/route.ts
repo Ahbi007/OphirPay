@@ -5,7 +5,7 @@ import prisma from "@/lib/prisma";
 import { successResponse, unauthorizedError, handleApiError } from "@/lib/api-response";
 import { withRequestLogging } from "@/lib/request-logging";
 import { getAuthContext } from "@/lib/auth-session";
-import type { BatchStatus, PaymentStatus } from "@/types";
+import type { BatchStatus } from "@/types";
 
 const BATCH_STATUSES: BatchStatus[] = [
   "CREATED",
@@ -16,7 +16,7 @@ const BATCH_STATUSES: BatchStatus[] = [
 ];
 
 /** Terminal statuses that count as "failed" for progress reporting. */
-const FAILED_STATUSES = new Set<PaymentStatus>(["FAILED", "CANCELLED"]);
+const FAILED_STATUSES = new Set<string>(["FAILED", "CANCELLED"]);
 
 /**
  * GET /api/batches/summary — roll up batch statuses into counts
@@ -87,10 +87,10 @@ export const GET = withMetrics(
       const counts: Record<string, number> = Object.fromEntries(
         BATCH_STATUSES.map((s: BatchStatus) => [s, 0])
       );
-      for (const g of statusGroups as any[]) {
+      for (const g of statusGroups) {
         counts[g.status] = g._count._all;
       }
-      const total = (statusGroups as any[]).reduce((sum: number, g: any) => sum + g._count._all, 0);
+      const total = statusGroups.reduce((sum: number, g) => sum + g._count._all, 0);
       // Per-batch payment progress keyed by batchId → status → count.
       const perBatchStatus = new Map<string, Record<string, number>>();
 
@@ -104,11 +104,11 @@ export const GET = withMetrics(
 
         globalProgress.total += p._count._all;
         if (p.status === "COMPLETED") globalProgress.completed += p._count._all;
-        else if (FAILED_STATUSES.has(p.status as any)) globalProgress.failed += p._count._all;
+        else if (FAILED_STATUSES.has(p.status)) globalProgress.failed += p._count._all;
         else globalProgress.pending += p._count._all;
       }
 
-      const drillDown = batches.map((batch: any) => {
+      const drillDown = batches.map((batch) => {
         const pc = perBatchStatus.get(batch.id) ?? {};
         const completed = pc["COMPLETED"] ?? 0;
         const failed = (pc["FAILED"] ?? 0) + (pc["CANCELLED"] ?? 0);

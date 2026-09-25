@@ -4,14 +4,15 @@ import { withMetrics } from "@/lib/metrics-middleware";
 import prisma from "@/lib/prisma";
 import { successResponse, handleApiError, notFoundError, unauthorizedError } from "@/lib/api-response";
 import { getAuthContext } from "@/lib/auth-session";
-import { simulateContractCall, DEFAULT_CONTRACT_ID, CHAIN_READ_SOURCE } from "@/lib/contracts";
-import { nativeToScVal } from "@stellar/stellar-sdk";
+import { toBatchItemStatus, computeBatchProgress } from "@/lib/batch-progress";
 import { withRequestLogging } from "@/lib/request-logging";
+import { verifyCsrf } from "@/lib/csrf";
 import { logger } from "@/lib/logger";
 
 /**
- * GET /api/batches/[id] — single batch lookup
- * Reads from OphirPayContract on-chain. Supports ?payments=true for included payment IDs.
+ * GET /api/batches/[id] — single batch with per-item progress.
+ * Reads from database. Each payment is mapped to a lightweight item
+ * status (pending / sent / failed) and aggregate progress counts.
  */
 export const GET = withMetrics("GET /api/batches/[id]", withRequestLogging(async function GET(
   request: Request,
@@ -26,41 +27,38 @@ export const GET = withMetrics("GET /api/batches/[id]", withRequestLogging(async
     }
 
     const { id } = await params;
-    const batchId = parseInt(id, 10);
 
-    if (isNaN(batchId)) {
-      return notFoundError("Invalid batch ID");
+    const batch = await prisma.batch.findFirst({
+      where: { id, userId: auth.userId },
+      include: { payments: true },
+    });
+
+    if (!batch) {
+      return notFoundError(`Batch ${id}`);
     }
 
-    const result = await simulateContractCall(
-      DEFAULT_CONTRACT_ID,
-      "get_batch",
-      CHAIN_READ_SOURCE,
-      [nativeToScVal(batchId, { type: "u64" })]
-    );
+    const items = batch.payments.map((p) => ({
+      id: p.id,
+      amount: Number(p.amount),
+      assetCode: p.assetCode,
+      status: toBatchItemStatus(p.status),
+      memo: p.memo || undefined,
+      errorMessage: p.errorMessage || undefined,
+    }));
 
-    if (result.status === "SIMULATION_FAILED" || !result.returnValue) {
-      return notFoundError(`Batch ${id} not found`);
-    }
+    const progress = computeBatchProgress(batch.payments);
 
-    const batch = result.returnValue as Record<string, unknown>;
-
-    // Optionally include batch payments
-    const { searchParams } = new URL(request.url);
-    if (searchParams.get("payments") === "true") {
-      const paymentsResult = await simulateContractCall(
-        DEFAULT_CONTRACT_ID,
-        "get_payments_by_batch",
-        CHAIN_READ_SOURCE,
-        [nativeToScVal(batchId, { type: "u64" })]
-      );
-      return successResponse({
-        ...batch,
-        payments: paymentsResult.status === "SIMULATION_FAILED" ? [] : paymentsResult.returnValue,
-      });
-    }
-
-    return successResponse(batch);
+    return successResponse({
+      id: batch.id,
+      userId: batch.userId,
+      name: batch.name,
+      description: batch.description,
+      status: batch.status,
+      createdAt: batch.createdAt,
+      updatedAt: batch.updatedAt,
+      items,
+      progress,
+    });
   } catch (err) {
     return handleApiError(err, "GET /api/batches/[id]");
   }
@@ -85,6 +83,8 @@ export const POST = withMetrics("POST /api/batches/[id]", withRequestLogging(asy
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const csrfError = verifyCsrf(request);
+    if (csrfError) return csrfError;
     const auth = await getAuthContext(request);
     if (!auth) {
       return unauthorizedError(

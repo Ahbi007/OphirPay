@@ -311,6 +311,21 @@ export async function processRefund(
   return signAndSubmit(caller, CONTRACT_ID, "process_refund", args);
 }
 
+/**
+ * Reject a requested refund on-chain (`reject_refund`). Owner-only in the
+ * contract; the caller's signature over the invocation is what authorizes it.
+ */
+export async function rejectRefund(
+  caller: string,
+  refundId: number,
+): Promise<ContractCallResult> {
+  const args: xdr.ScVal[] = [
+    nativeToScVal(caller, { type: "address" }),
+    nativeToScVal(refundId, { type: "u64" }),
+  ];
+  return signAndSubmit(caller, CONTRACT_ID, "reject_refund", args);
+}
+
 // ── Notification Hook Functions ───────────────────────────────
 
 export async function registerHook(
@@ -497,4 +512,42 @@ export async function getMultisigConfigHistory(sourcePublicKey: string) {
  */
 export async function getPolicyFeeConfigHistory(sourcePublicKey: string) {
   return simulateContractCall(CONTRACT_ID, "get_fee_config_history", sourcePublicKey);
+}
+
+// ── Pause / Unpause Functions ──────────────────────────────────
+
+/**
+ * Check whether the contract is currently paused.
+ * Read-only simulation — no wallet signature required.
+ */
+export async function isPaused(sourcePublicKey: string): Promise<boolean> {
+  const result = await simulateContractCall(CONTRACT_ID, "is_paused", sourcePublicKey);
+  if (result.status === "SIMULATION_FAILED") return false;
+  return result.returnValue === true;
+}
+
+/**
+ * Emergency pause: pauses BOTH OphirPay AND the linked Emitter contract.
+ * Owner-only — requires wallet signing via Freighter.
+ */
+export async function emergencyPauseAll(
+  caller: string,
+): Promise<ContractCallResult> {
+  const args: xdr.ScVal[] = [
+    nativeToScVal(caller, { type: "address" }),
+  ];
+  return signAndSubmit(caller, CONTRACT_ID, "emergency_pause_all", args);
+}
+
+/**
+ * Emergency unpause: unpauses BOTH OphirPay AND the linked Emitter contract.
+ * Owner-only — requires wallet signing via Freighter.
+ */
+export async function emergencyUnpauseAll(
+  caller: string,
+): Promise<ContractCallResult> {
+  const args: xdr.ScVal[] = [
+    nativeToScVal(caller, { type: "address" }),
+  ];
+  return signAndSubmit(caller, CONTRACT_ID, "emergency_unpause_all", args);
 }
