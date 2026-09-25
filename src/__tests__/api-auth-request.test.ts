@@ -28,14 +28,17 @@ import {
   authenticateRequest,
   requireAuth,
   withApiAuth,
-  hashApiKey,
-  hashApiKeyV1,
+  apiKeyLookupHashes,
   deriveKeyPrefix,
 } from "@/lib/api-auth";
 
-// Current key format: `oph_` + 32 CSPRNG bytes as lowercase hex (#701). Only
-// this shape (and the legacy 24-byte one) is accepted at auth time.
-const RAW_KEY = `oph_${"0123456789abcdef".repeat(4)}`;
+/**
+ * A key in the current format (issue #701): `oph_` + 64 lowercase hex chars.
+ * The lookup now hashes with the versioned scheme and rejects malformed
+ * material before touching the database, so a legacy-shaped literal here would
+ * return null early and mask the lookup behaviour under test.
+ */
+const RAW_KEY = `oph_${"a".repeat(64)}`;
 
 function requestWithKey(key = RAW_KEY): Request {
   return new Request("http://localhost/api/payments", {
@@ -70,7 +73,7 @@ describe("authenticateRequest", () => {
   it("looks the key up by prefix and both accepted digests", async () => {
     mocks.findFirst.mockResolvedValue(storedKey());
 
-    const result = await authenticateRequest(requestWithKey());
+    const result = await authenticateRequest(requestWithKey(RAW_KEY));
 
     expect(result).toEqual({
       userId: "user_1",
@@ -79,11 +82,11 @@ describe("authenticateRequest", () => {
       scopes: ["read:payments"],
     });
 
-    // `in` carries the current `v1:` digest first, then the pre-#701 bare
-    // digest, so keys minted before #701 keep authenticating.
+    // Newest digest format first, then the legacy bare-SHA-256 digest, so
+    // pre-#701 keys keep authenticating alongside v1-tagged ones.
     expect(mocks.findFirst).toHaveBeenCalledWith({
       where: {
-        keyHash: { in: [hashApiKeyV1(RAW_KEY), hashApiKey(RAW_KEY)] },
+        keyHash: { in: apiKeyLookupHashes(RAW_KEY) },
         prefix: deriveKeyPrefix(RAW_KEY),
       },
       select: { id: true, userId: true, name: true, expiresAt: true, scopes: true },
