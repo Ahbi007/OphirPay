@@ -34,6 +34,8 @@ jobs:
       - uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a # v4.2.0
         with: { node-version-file: '.nvmrc', cache: "npm" }
       - run: npm ci
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node-prisma # node-version-file: '.nvmrc'
       - run: npm run lint -- --max-warnings 0
 
   # ══════════════════════════════════════════════════════════════
@@ -49,6 +51,8 @@ jobs:
         with: { node-version-file: '.nvmrc', cache: "npm" }
       - run: npm ci
       - run: npx prisma generate
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node-prisma # node-version-file: '.nvmrc'
       - run: npx tsc --noEmit
 
   # ══════════════════════════════════════════════════════════════
@@ -64,6 +68,8 @@ jobs:
         with: { node-version-file: '.nvmrc', cache: "npm" }
       - run: npm ci
       - run: npx prisma generate
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node-prisma # node-version-file: '.nvmrc'
       - run: npx vitest run --reporter=verbose
 
   # ══════════════════════════════════════════════════════════════
@@ -81,6 +87,8 @@ jobs:
         with: { node-version-file: '.nvmrc', cache: "npm" }
       - run: npm ci
       - run: npx prisma generate
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-node-prisma # node-version-file: '.nvmrc'
       - run: npm run build
       - name: Verify build output
         run: |
